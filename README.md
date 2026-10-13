@@ -21,6 +21,13 @@ this repository: the launcher downloads it from originsco.online.
 - **Self-update:** a newer `launcherVersion` in the manifest replaces the exe and restarts it.
 - **Offline:** if the update server is down and the game is installed, PLAY still works.
 - **Log:** `.originsupdate\launcher.log` in the game folder.
+- **Uninstall:** Windows Settings → Apps → Installed apps → Origins Conquer → Uninstall (or
+  `OriginsLauncher.exe --uninstall`): removes the game files, shortcuts, the installed-apps entry and
+  the per-user Flash registration the launcher made; files the player added to the folder stay.
+
+The install dialog lists every change it makes to the system: desktop and Start menu shortcuts, the
+installed-apps entry, and (only when Windows has no Flash) a per-user registration of the game's
+Flash component, which the game's login screen needs. No administrator rights are used.
 
 ## Privacy
 

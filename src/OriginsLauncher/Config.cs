@@ -22,6 +22,11 @@ namespace OriginsLauncher
         /// <summary>Started by the self-update script: never self-update twice in a row.</summary>
         public bool AfterUpdate { get; private set; }
 
+        public const string UninstallArg = "--uninstall";
+
+        /// <summary>Started from Windows' installed apps list (or the Start menu): remove the game.</summary>
+        public bool Uninstall { get; private set; }
+
         public string NewsUrl => SiteUrl + "api/news";
         public string ManifestUrl => UpdateBaseUrl + "manifest.json";
 
@@ -39,6 +44,8 @@ namespace OriginsLauncher
                     config.SiteUrl = WithSlash(arg.Substring("--site-url=".Length));
                 else if (arg.Equals(AfterUpdateArg, StringComparison.OrdinalIgnoreCase))
                     config.AfterUpdate = true;
+                else if (arg.Equals(UninstallArg, StringComparison.OrdinalIgnoreCase))
+                    config.Uninstall = true;
                 else if (arg.StartsWith("--dir=", StringComparison.OrdinalIgnoreCase))
                 {
                     config.InstallDir = Path.GetFullPath(arg.Substring("--dir=".Length));

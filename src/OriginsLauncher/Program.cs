@@ -19,6 +19,13 @@ namespace OriginsLauncher
 
             var config = Config.FromArgs(args);
             L.S = Strings.For(Settings.Load(config).Language ?? Strings.SystemLanguage());
+            if (config.Uninstall)
+            {
+                Log.Init(config);
+                Installer.Uninstall(config);
+                return;
+            }
+
             if (!config.ExplicitDir)
             {
                 if (Installer.NeedsOwnFolder(config))
@@ -30,6 +37,7 @@ namespace OriginsLauncher
 
                 if (Installer.IsFirstRun(config))
                     Installer.CreateShortcuts(Installer.LauncherPath);
+                Installer.RegisterUninstall(config);
             }
 
             Application.Run(new MainForm(config));

@@ -14,6 +14,7 @@ namespace OriginsLauncher
         public string Subtitle, News, Welcome, ClientVersion, DateFormat;
         public string VerifyingFiles, VerifyingDetail, Downloading, Retry, UpdatingLauncher, BadLauncher, BadManifest;
         public string DownloadingPack, Unpacking;
+        public string UninstallTitle, UninstallConfirm, UninstallGameOpen, UninstallDone;
         public string Corrupted, ConnInterrupted, ConnStalled, CannotReplace, Of, Remaining;
         public string InstallTitle, InstallHeading, InstallInfo, Browse, Install, Cancel, PickFolder, InstallFailed;
 
@@ -46,7 +47,11 @@ namespace OriginsLauncher
             CannotReplace = "Could not replace {0}. Close the game and try again.",
             Of = "{0} of {1}", Remaining = "{0} left",
             InstallTitle = "Install Origins Conquer", InstallHeading = "Where do you want to install the game?",
-            InstallInfo = "The launcher downloads the game into this folder (about 450 MB to download, 1.3 GB installed) and creates a desktop shortcut.",
+            InstallInfo = "The launcher downloads the game into this folder (about 450 MB to download, 1.3 GB installed), creates desktop and Start menu shortcuts, adds Origins Conquer to Windows' installed apps (to uninstall) and, if Windows has no Flash, registers the game's Flash component for your user.",
+            UninstallTitle = "Uninstall Origins Conquer",
+            UninstallConfirm = "Remove Origins Conquer from this computer?\n\nThe game files in {0}, the shortcuts and the launcher will be deleted. Files you added to the folder are kept.",
+            UninstallGameOpen = "Close the game before uninstalling.",
+            UninstallDone = "Origins Conquer was removed.",
             Browse = "Browse...", Install = "Install", Cancel = "Cancel", PickFolder = "Choose the install folder",
             InstallFailed = "Could not install here: {0}"
         };
@@ -80,7 +85,11 @@ namespace OriginsLauncher
             CannotReplace = "Não foi possível substituir {0}. Feche o jogo e tente de novo.",
             Of = "{0} de {1}", Remaining = "{0} restantes",
             InstallTitle = "Instalar Origins Conquer", InstallHeading = "Onde instalar o jogo?",
-            InstallInfo = "O launcher baixa o jogo para esta pasta (cerca de 450 MB de download, 1,3 GB instalado) e cria um atalho na área de trabalho.",
+            InstallInfo = "O launcher baixa o jogo para esta pasta (cerca de 450 MB de download, 1,3 GB instalado), cria atalhos na área de trabalho e no menu Iniciar, adiciona o Origins Conquer aos aplicativos instalados do Windows (para desinstalar) e, se o Windows não tiver Flash, registra o componente Flash do jogo para o seu usuário.",
+            UninstallTitle = "Desinstalar Origins Conquer",
+            UninstallConfirm = "Remover o Origins Conquer deste computador?\n\nOs arquivos do jogo em {0}, os atalhos e o launcher serão apagados. Arquivos que você colocou na pasta são mantidos.",
+            UninstallGameOpen = "Feche o jogo antes de desinstalar.",
+            UninstallDone = "O Origins Conquer foi removido.",
             Browse = "Procurar...", Install = "Instalar", Cancel = "Cancelar", PickFolder = "Escolha a pasta de instalação",
             InstallFailed = "Não foi possível instalar aqui: {0}"
         };
@@ -114,7 +123,11 @@ namespace OriginsLauncher
             CannotReplace = "Hindi mapalitan ang {0}. Isara ang laro at subukan ulit.",
             Of = "{0} sa {1}", Remaining = "{0} na lang",
             InstallTitle = "I-install ang Origins Conquer", InstallHeading = "Saan mo gustong i-install ang laro?",
-            InstallInfo = "Ida-download ng launcher ang laro sa folder na ito (mga 450 MB na download, 1.3 GB kapag naka-install) at gagawa ng shortcut sa desktop.",
+            InstallInfo = "Ida-download ng launcher ang laro sa folder na ito (mga 450 MB na download, 1.3 GB kapag naka-install), gagawa ng shortcut sa desktop at sa Start menu, idadagdag ang Origins Conquer sa mga naka-install na app ng Windows (para ma-uninstall) at, kung walang Flash ang Windows, ire-register ang Flash component ng laro para sa user mo.",
+            UninstallTitle = "I-uninstall ang Origins Conquer",
+            UninstallConfirm = "Alisin ang Origins Conquer sa computer na ito?\n\nBuburahin ang mga file ng laro sa {0}, ang mga shortcut at ang launcher. Hindi gagalawin ang mga file na idinagdag mo sa folder.",
+            UninstallGameOpen = "Isara muna ang laro bago mag-uninstall.",
+            UninstallDone = "Naalis na ang Origins Conquer.",
             Browse = "Mag-browse...", Install = "I-install", Cancel = "Kanselahin", PickFolder = "Piliin ang folder ng install",
             InstallFailed = "Hindi ma-install dito: {0}"
         };

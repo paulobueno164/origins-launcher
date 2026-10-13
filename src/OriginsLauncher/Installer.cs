@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace OriginsLauncher
 {
@@ -85,6 +86,139 @@ namespace OriginsLauncher
         }
 
         public static string LauncherPath => Process.GetCurrentProcess().MainModule.FileName;
+
+        // ------------------------------------------------------------------ uninstall
+
+        private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\OriginsConquer";
+        private const string FlashClsid = "{D27CDB6E-AE6D-11cf-96B8-444553540000}";
+
+        /// <summary>
+        ///     Lists the game in Windows' installed apps (current user only, no admin) with an
+        ///     Uninstall button that runs "OriginsLauncher.exe --uninstall". Refreshed on every start.
+        /// </summary>
+        public static void RegisterUninstall(Config config)
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
+                {
+                    key.SetValue("DisplayName", "Origins Conquer");
+                    key.SetValue("DisplayIcon", LauncherPath + ",0");
+                    key.SetValue("DisplayVersion", Updater.CurrentVersion.ToString(3));
+                    key.SetValue("Publisher", "Origins Conquer");
+                    key.SetValue("URLInfoAbout", config.SiteUrl);
+                    key.SetValue("InstallLocation", config.InstallDir);
+                    key.SetValue("UninstallString", $"\"{LauncherPath}\" {Config.UninstallArg}");
+                    key.SetValue("NoModify", 1, RegistryValueKind.DWord);
+                    key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+                    key.SetValue("EstimatedSize", 1400 * 1024, RegistryValueKind.DWord); // KB
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write($"uninstall entry not written: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        ///     Removes what the launcher installed: the game files listed in the last manifest, its
+        ///     state folder, the shortcuts, the installed-apps entry and the per-user Flash
+        ///     registration it made. Files the player put in the folder stay; the launcher itself
+        ///     and the emptied folders go once this process has exited.
+        /// </summary>
+        public static void Uninstall(Config config)
+        {
+            string dir = config.InstallDir;
+            if (MessageBox.Show(string.Format(L.S.UninstallConfirm, dir.TrimEnd('\\')), L.S.UninstallTitle,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+
+            if (Process.GetProcessesByName("Conquer").Any(p => IsUnder(SafePath(p), dir)))
+            {
+                MessageBox.Show(L.S.UninstallGameOpen, L.S.UninstallTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var manifest = new Updater(config).LoadLocalManifest();
+            var files = manifest == null
+                ? Enumerable.Empty<string>()
+                : manifest.Files.Select(f => f.Path)
+                    .Concat(manifest.Languages?.Values.SelectMany(p => p).Select(f => f.Path) ?? Enumerable.Empty<string>());
+            foreach (string relative in files.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                string full = Path.GetFullPath(Path.Combine(dir, relative));
+                if (!IsUnder(full, dir)) continue;
+                TryDelete(() => { if (File.Exists(full)) { File.SetAttributes(full, FileAttributes.Normal); File.Delete(full); } });
+            }
+
+            // written by the game or the launcher at run time
+            foreach (string sub in new[] {".originsupdate", "LOG", "debug"})
+                TryDelete(() => { if (Directory.Exists(Path.Combine(dir, sub))) Directory.Delete(Path.Combine(dir, sub), true); });
+
+            foreach (var folder in new[]
+                     {
+                         Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                         Environment.GetFolderPath(Environment.SpecialFolder.Programs)
+                     })
+            {
+                if (string.IsNullOrEmpty(folder)) continue;
+                string link = Path.Combine(folder, ShortcutName);
+                TryDelete(() =>
+                {
+                    if (!File.Exists(link)) return;
+                    var shell = (dynamic) Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+                    string target = shell.CreateShortcut(link).TargetPath;
+                    if (string.Equals(target, LauncherPath, StringComparison.OrdinalIgnoreCase))
+                        File.Delete(link); // another install's shortcut stays
+                });
+            }
+
+            string ocx = Path.Combine(dir, "Flash.ocx");
+            foreach (var keyPath in new[] {$@"Software\Classes\CLSID\{FlashClsid}", $@"Software\Classes\Wow6432Node\CLSID\{FlashClsid}"})
+            {
+                TryDelete(() =>
+                {
+                    using (var server = Registry.CurrentUser.OpenSubKey(keyPath + @"\InprocServer32"))
+                        if (!(server?.GetValue(null) is string path) || !path.Equals(ocx, StringComparison.OrdinalIgnoreCase))
+                            return; // not ours
+                    Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+                });
+            }
+
+            TryDelete(() => Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false));
+
+            // the running exe and the (now empty) folders: removed by a script after this process exits
+            string script = Path.Combine(Path.GetTempPath(), "origins-uninstall.cmd");
+            int pid = Process.GetCurrentProcess().Id;
+            File.WriteAllText(script, string.Join("\r\n",
+                "@echo off",
+                ":wait",
+                $"tasklist /FI \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul && (ping 127.0.0.1 -n 2 >nul & goto wait)",
+                $"del /f /q \"{LauncherPath}\" >nul 2>&1",
+                $"for /f \"delims=\" %%d in ('dir /ad /b /s \"{dir.TrimEnd('\\')}\" ^| sort /r') do rd \"%%d\" >nul 2>&1",
+                $"rd \"{dir.TrimEnd('\\')}\" >nul 2>&1",
+                "del \"%~f0\"",
+                ""), System.Text.Encoding.Default);
+            Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"")
+                {CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden});
+
+            MessageBox.Show(L.S.UninstallDone, L.S.UninstallTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private static bool IsUnder(string path, string dir) =>
+            !string.IsNullOrEmpty(path) && Path.GetFullPath(path).StartsWith(dir, StringComparison.OrdinalIgnoreCase);
+
+        private static string SafePath(Process process)
+        {
+            try { return process.MainModule?.FileName; }
+            catch (Exception) { return null; }
+        }
+
+        private static void TryDelete(Action delete)
+        {
+            try { delete(); }
+            catch (Exception ex) { Log.Write($"uninstall: {ex.Message}"); }
+        }
     }
 
     /// <summary>First-run dialog: install folder with a default, a browse button and confirm.</summary>
@@ -103,7 +237,7 @@ namespace OriginsLauncher
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(520, 210);
+            ClientSize = new Size(520, 250);
             BackColor = Theme.Background;
             ForeColor = Theme.Text;
             Font = new Font("Segoe UI", 9.5f);
@@ -116,21 +250,21 @@ namespace OriginsLauncher
             var info = new Label
             {
                 Text = L.S.InstallInfo,
-                ForeColor = Theme.Muted, Location = new Point(22, 52), Size = new Size(480, 40)
+                ForeColor = Theme.Muted, Location = new Point(22, 52), Size = new Size(480, 80)
             };
-            m_path.SetBounds(22, 98, 380, 26);
+            m_path.SetBounds(22, 138, 380, 26);
             m_path.Text = folder;
             m_path.BackColor = Color.FromArgb(24, 26, 33);
             m_path.ForeColor = Theme.Text;
             m_path.BorderStyle = BorderStyle.FixedSingle;
             var browse = new GoldButton {Text = L.S.Browse};
-            browse.SetBounds(410, 96, 90, 28);
-            m_error.SetBounds(22, 130, 480, 20);
+            browse.SetBounds(410, 136, 90, 28);
+            m_error.SetBounds(22, 170, 480, 20);
             m_error.ForeColor = Theme.Error;
             var install = new GoldButton {Text = L.S.Install, Primary = true, Font = new Font("Segoe UI Semibold", 10.5f)};
-            install.SetBounds(300, 160, 120, 34);
+            install.SetBounds(300, 200, 120, 34);
             var cancel = new GoldButton {Text = L.S.Cancel};
-            cancel.SetBounds(428, 160, 72, 34);
+            cancel.SetBounds(428, 200, 72, 34);
             Controls.AddRange(new Control[] {title, info, m_path, browse, m_error, install, cancel});
 
             browse.Click += (s, e) =>
