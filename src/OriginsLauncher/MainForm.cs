@@ -278,9 +278,11 @@ namespace OriginsLauncher
             Invalidate();
         }
 
-        private void PlayGame()
+        private async void PlayGame()
         {
             if (m_manifest == null && !m_updater.GameFilesPresent()) return;
+            var manifest = m_manifest ?? new Manifest {GameExe = "Conquer.exe", GameArgs = "blacknull"};
+            Process first;
             try
             {
                 try
@@ -292,14 +294,34 @@ namespace OriginsLauncher
                     // the game registers Flash itself when it can; never block playing for this
                 }
 
-                var game = m_updater.StartGame(m_manifest ?? new Manifest {GameExe = "Conquer.exe", GameArgs = "blacknull"});
-                Log.Write($"game started pid={game?.Id}");
-                Close();
+                first = m_updater.StartGame(manifest);
             }
             catch (Exception ex)
             {
                 SetError(L.S.CannotStart, ex.Message);
+                return;
             }
+
+            // The launcher stays in the background while the game runs: full screen (Magpie) and
+            // the restart after the game's Window/Full Screen buttons are handled by the session.
+            Hide();
+            var session = new GameSession(m_config, () =>
+            {
+                if (first == null) return m_updater.StartGame(manifest);
+                var started = first;
+                first = null;
+                return started;
+            });
+            try
+            {
+                await session.RunAsync();
+            }
+            catch (Exception ex)
+            {
+                Log.Write($"game session failed: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            Close();
         }
 
         private void SetStatus(string status, string detail, double fraction, Color? color = null)

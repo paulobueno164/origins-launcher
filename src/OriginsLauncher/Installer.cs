@@ -139,6 +139,10 @@ namespace OriginsLauncher
                 return;
             }
 
+            // the full screen scaler is normally closed with the game; a leftover one would lock its files
+            foreach (var magpie in Process.GetProcessesByName("Magpie").Where(p => IsUnder(SafePath(p), dir)))
+                TryDelete(() => magpie.Kill());
+
             var manifest = new Updater(config).LoadLocalManifest();
             var files = manifest == null
                 ? Enumerable.Empty<string>()
@@ -152,7 +156,7 @@ namespace OriginsLauncher
             }
 
             // written by the game or the launcher at run time
-            foreach (string sub in new[] {".originsupdate", "LOG", "debug"})
+            foreach (string sub in new[] {".originsupdate", "LOG", "debug", @"Magpie\config", @"Magpie\cache", @"Magpie\logs"})
                 TryDelete(() => { if (Directory.Exists(Path.Combine(dir, sub))) Directory.Delete(Path.Combine(dir, sub), true); });
 
             foreach (var folder in new[]

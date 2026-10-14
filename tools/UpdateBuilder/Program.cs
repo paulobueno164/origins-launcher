@@ -290,6 +290,7 @@ static bool Excluded(string rel)
 {
     string top = rel.Split(Path.DirectorySeparatorChar)[0];
     if (ExcludedDirs.Contains(top) && rel.Contains(Path.DirectorySeparatorChar)) return true;
+    if (ExcludedSubDirs.Any(d => rel.StartsWith(d + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) return true;
     string name = Path.GetFileName(rel);
     return ExcludedFiles.Contains(rel) ||
            name.EndsWith(".originstmp", StringComparison.OrdinalIgnoreCase) ||
@@ -350,6 +351,9 @@ partial class Program
 {
     // Logs, TQ's own patcher and shortcuts to TQ sites never ship.
     private static readonly HashSet<string> ExcludedDirs = new(StringComparer.OrdinalIgnoreCase) {"LOG", "debug", "AutoPatch"};
+
+    // Written at run time by the full screen scaler (the launcher fills config\ from origins-config.json).
+    private static readonly string[] ExcludedSubDirs = [@"Magpie\config", @"Magpie\cache", @"Magpie\logs"];
 
     private static readonly HashSet<string> ExcludedFiles = new(StringComparer.OrdinalIgnoreCase)
         {"AutoPatch.exe", "AutoPatch.dat", "1.url", "2.url", @"Help\credit.exe"}; // credit.exe: TQ's credits program, unused

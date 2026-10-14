@@ -12,7 +12,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>OriginsLauncher</AssemblyName>
     <RootNamespace>OriginsLauncher</RootNamespace>
-    <Version>1.2.2</Version>
+    <Version>1.3.0</Version>
     <Company>Origins Conquer</Company>
     <Product>Origins Conquer Launcher</Product>
     <Description>Launcher e atualizador do Origins Conquer</Description>
