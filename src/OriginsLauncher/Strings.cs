@@ -17,6 +17,7 @@ namespace OriginsLauncher
         public string UninstallTitle, UninstallConfirm, UninstallGameOpen, UninstallDone;
         public string Corrupted, ConnInterrupted, ConnStalled, CannotReplace, Of, Remaining;
         public string InstallTitle, InstallHeading, InstallInfo, Browse, Install, Cancel, PickFolder, InstallFailed;
+        public string Options, FillScreen;
 
         public static readonly Strings En = new Strings
         {
@@ -53,7 +54,8 @@ namespace OriginsLauncher
             UninstallGameOpen = "Close the game before uninstalling.",
             UninstallDone = "Origins Conquer was removed.",
             Browse = "Browse...", Install = "Install", Cancel = "Cancel", PickFolder = "Choose the install folder",
-            InstallFailed = "Could not install here: {0}"
+            InstallFailed = "Could not install here: {0}",
+            Options = "Options", FillScreen = "Full screen: fill the whole monitor (stretches the image)"
         };
 
         public static readonly Strings Pt = new Strings
@@ -91,7 +93,8 @@ namespace OriginsLauncher
             UninstallGameOpen = "Feche o jogo antes de desinstalar.",
             UninstallDone = "O Origins Conquer foi removido.",
             Browse = "Procurar...", Install = "Instalar", Cancel = "Cancelar", PickFolder = "Escolha a pasta de instalação",
-            InstallFailed = "Não foi possível instalar aqui: {0}"
+            InstallFailed = "Não foi possível instalar aqui: {0}",
+            Options = "Opções", FillScreen = "Tela cheia: preencher o monitor inteiro (estica a imagem)"
         };
 
         public static readonly Strings Fil = new Strings
@@ -129,7 +132,8 @@ namespace OriginsLauncher
             UninstallGameOpen = "Isara muna ang laro bago mag-uninstall.",
             UninstallDone = "Naalis na ang Origins Conquer.",
             Browse = "Mag-browse...", Install = "I-install", Cancel = "Kanselahin", PickFolder = "Piliin ang folder ng install",
-            InstallFailed = "Hindi ma-install dito: {0}"
+            InstallFailed = "Hindi ma-install dito: {0}",
+            Options = "Options", FillScreen = "Full screen: punuin ang buong monitor (nai-stretch ang larawan)"
         };
 
         public static readonly Strings[] All = {En, Pt, Fil};
@@ -163,6 +167,9 @@ namespace OriginsLauncher
     internal sealed class Settings
     {
         [DataMember(Name = "language")] public string Language { get; set; }
+
+        /// <summary>Full screen stretches the 4:3 game over the whole monitor instead of keeping its shape (black bars).</summary>
+        [DataMember(Name = "fillScreen")] public bool FillScreen { get; set; }
 
         public static Settings Load(Config config)
         {

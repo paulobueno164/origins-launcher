@@ -24,11 +24,14 @@ namespace OriginsLauncher
 
         private readonly Config m_config;
         private readonly Func<Process> m_startGame;
+        private readonly Func<bool> m_fillScreen;
 
-        public GameSession(Config config, Func<Process> startGame)
+        /// <param name="fillScreen">the player's "fill the whole monitor" option, read each time Magpie starts</param>
+        public GameSession(Config config, Func<Process> startGame, Func<bool> fillScreen = null)
         {
             m_config = config;
             m_startGame = startGame;
+            m_fillScreen = fillScreen ?? (() => false);
         }
 
         private string MagpieDir => Path.Combine(m_config.InstallDir, MagpieFolder);
@@ -105,6 +108,10 @@ namespace OriginsLauncher
                 string className = ClassName(window);
                 string template = File.ReadAllText(Path.Combine(MagpieDir, MagpieTemplate), Encoding.UTF8);
                 string json = template.Replace("{{GAME_PATH}}", JsonEscape(path)).Replace("{{GAME_CLASS}}", JsonEscape(className));
+                // Magpie's scaling types: 1 = Fit (keeps 4:3, black bars on wide monitors), 3 = Fill (stretches)
+                bool fill = m_fillScreen();
+                if (fill)
+                    json = json.Replace("\"scalingType\": 1", "\"scalingType\": 3");
                 Directory.CreateDirectory(Path.Combine(MagpieDir, "config"));
                 File.WriteAllText(Path.Combine(MagpieDir, "config", "config.json"), json, new UTF8Encoding(false));
 
@@ -120,7 +127,7 @@ namespace OriginsLauncher
                     WorkingDirectory = MagpieDir,
                     UseShellExecute = false
                 });
-                Log.Write($"full screen: Magpie pid={magpie?.Id} window class={className}");
+                Log.Write($"full screen: Magpie pid={magpie?.Id} window class={className} fill={fill}");
             }
             catch (Exception ex)
             {

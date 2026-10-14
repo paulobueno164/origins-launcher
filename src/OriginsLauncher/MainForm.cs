@@ -23,6 +23,10 @@ namespace OriginsLauncher
         private readonly GoldButton m_check = new GoldButton();
         private readonly GoldButton m_language = new GoldButton();
         private readonly ContextMenuStrip m_languageMenu = new ContextMenuStrip();
+        private readonly GoldButton m_options = new GoldButton {Text = "⚙"};
+        private readonly ContextMenuStrip m_optionsMenu = new ContextMenuStrip();
+        private readonly ToolStripMenuItem m_fillScreen = new ToolStripMenuItem {CheckOnClick = true};
+        private readonly ToolTip m_tooltip = new ToolTip();
         private readonly Settings m_settings;
         private bool m_recheckAfterBusy;
         private readonly GoldButton m_close = new GoldButton {Text = "✕"};
@@ -78,10 +82,23 @@ namespace OriginsLauncher
             }
 
             m_language.Click += (s, e) => m_languageMenu.Show(m_language, new Point(0, m_language.Height));
+            // options: full screen keeps the 4:3 image (black bars on wide monitors) unless "fill" is ticked
+            m_options.SetBounds(630, 12, 32, 28);
+            m_options.Font = new Font("Segoe UI Symbol", 10f);
+            m_fillScreen.Checked = m_settings.FillScreen;
+            m_fillScreen.CheckedChanged += (s, e) =>
+            {
+                m_settings.FillScreen = m_fillScreen.Checked;
+                try { m_settings.Save(m_config); }
+                catch (Exception ex) { Log.Write($"settings not saved: {ex.Message}"); }
+                Log.Write($"fill screen -> {m_settings.FillScreen}");
+            };
+            m_optionsMenu.Items.Add(m_fillScreen);
+            m_options.Click += (s, e) => m_optionsMenu.Show(m_options, new Point(0, m_options.Height));
             ApplyTexts();
             m_close.Font = m_minimize.Font = new Font("Segoe UI", 10f);
             m_play.Enabled = false;
-            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language});
+            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language, m_options});
 
             m_play.Click += (s, e) => PlayGame();
             m_site.Click += (s, e) => OpenUrl(m_config.SiteUrl);
@@ -101,6 +118,8 @@ namespace OriginsLauncher
             m_language.Text = $"{L.S.Language}: {L.S.Code.ToUpperInvariant()}";
             foreach (ToolStripMenuItem item in m_languageMenu.Items)
                 item.Checked = (string) item.Tag == L.S.Code;
+            m_fillScreen.Text = L.S.FillScreen;
+            m_tooltip.SetToolTip(m_options, L.S.Options);
             Invalidate();
         }
 
@@ -311,7 +330,7 @@ namespace OriginsLauncher
                 var started = first;
                 first = null;
                 return started;
-            });
+            }, () => m_settings.FillScreen);
             try
             {
                 await session.RunAsync();
