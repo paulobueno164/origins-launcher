@@ -13,9 +13,11 @@ namespace OriginsLauncher
     ///     One play session. The 5095 client only renders 1024x768 (or 800x600) and its own "Full Screen"
     ///     switched the desktop to 16-bit colour, which Windows 8+ refuses. Full screen is done here
     ///     instead: when the saved mode (ini\GameSetUp.ini) is a full screen one, Magpie (GPL-3, shipped
-    ///     in the game's Magpie folder) scales the game window to the monitor with an FSR filter, keeping
-    ///     4:3. The game's Window/Full Screen buttons save the new mode and close the game; the session
-    ///     then starts it again in that mode.
+    ///     in the game's Magpie folder) scales the game window to the monitor with an FSR filter, filling
+    ///     it whatever its shape (1.5.0; "keep 4:3" in the options keeps the black bars). The game's
+    ///     Window/Full Screen buttons save the new mode and close the game; the session then starts it
+    ///     again in that mode. Leaving the world goes back to the login screen inside the same process
+    ///     (patched client, [Origins] ExitToLogin), so the session keeps waiting for that process.
     /// </summary>
     internal sealed class GameSession
     {
@@ -26,12 +28,12 @@ namespace OriginsLauncher
         private readonly Func<Process> m_startGame;
         private readonly Func<bool> m_fillScreen;
 
-        /// <param name="fillScreen">the player's "fill the whole monitor" option, read each time Magpie starts</param>
+        /// <param name="fillScreen">fill the whole monitor (not "keep 4:3"), read each time Magpie starts</param>
         public GameSession(Config config, Func<Process> startGame, Func<bool> fillScreen = null)
         {
             m_config = config;
             m_startGame = startGame;
-            m_fillScreen = fillScreen ?? (() => false);
+            m_fillScreen = fillScreen ?? (() => true);
         }
 
         private string MagpieDir => Path.Combine(m_config.InstallDir, MagpieFolder);
@@ -66,6 +68,24 @@ namespace OriginsLauncher
 
         /// <summary>ScreenModeRecord: 0 800x600 window, 1 800x600 full, 2 1024x768 window, 3 1024x768 full.</summary>
         private int ReadScreenMode() => (int) GetPrivateProfileInt("ScreenMode", "ScreenModeRecord", 2, SetupIni);
+
+        /// <summary>
+        ///     The patched client reads [Origins] ExitToLogin (default 1) on every exit from the world: 1 shows the login
+        ///     screen again, 0 closes the game as TQ's client did.
+        /// </summary>
+        public static void WriteExitToLogin(Config config, bool toLogin)
+        {
+            try
+            {
+                string ini = Path.Combine(config.InstallDir, "ini", "GameSetUp.ini");
+                if (File.Exists(ini))
+                    WritePrivateProfileString("Origins", "ExitToLogin", toLogin ? "1" : "0", ini);
+            }
+            catch (Exception ex)
+            {
+                Log.Write($"ExitToLogin not written: {ex.Message}");
+            }
+        }
 
         private static bool IsFullScreen(int mode) => mode == 1 || mode == 3;
 
@@ -271,6 +291,9 @@ namespace OriginsLauncher
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         private static extern uint GetPrivateProfileInt(string section, string key, int defaultValue, string file);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        private static extern bool WritePrivateProfileString(string section, string key, string value, string file);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);

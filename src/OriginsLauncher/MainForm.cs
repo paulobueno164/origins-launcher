@@ -25,7 +25,8 @@ namespace OriginsLauncher
         private readonly ContextMenuStrip m_languageMenu = new ContextMenuStrip();
         private readonly GoldButton m_options = new GoldButton {Text = "⚙"};
         private readonly ContextMenuStrip m_optionsMenu = new ContextMenuStrip();
-        private readonly ToolStripMenuItem m_fillScreen = new ToolStripMenuItem {CheckOnClick = true};
+        private readonly ToolStripMenuItem m_keepAspect = new ToolStripMenuItem {CheckOnClick = true};
+        private readonly ToolStripMenuItem m_exitToLogin = new ToolStripMenuItem {CheckOnClick = true};
         private readonly ToolTip m_tooltip = new ToolTip();
         private readonly Settings m_settings;
         private bool m_recheckAfterBusy;
@@ -82,18 +83,24 @@ namespace OriginsLauncher
             }
 
             m_language.Click += (s, e) => m_languageMenu.Show(m_language, new Point(0, m_language.Height));
-            // options: full screen keeps the 4:3 image (black bars on wide monitors) unless "fill" is ticked
+            // options: full screen fills the monitor unless "keep 4:3" is ticked; leaving the game shows the login
+            // screen unless "go back to login" is unticked
             m_options.SetBounds(630, 12, 32, 28);
             m_options.Font = new Font("Segoe UI Symbol", 10f);
-            m_fillScreen.Checked = m_settings.FillScreen;
-            m_fillScreen.CheckedChanged += (s, e) =>
+            m_keepAspect.Checked = m_settings.KeepAspect;
+            m_keepAspect.CheckedChanged += (s, e) =>
             {
-                m_settings.FillScreen = m_fillScreen.Checked;
-                try { m_settings.Save(m_config); }
-                catch (Exception ex) { Log.Write($"settings not saved: {ex.Message}"); }
-                Log.Write($"fill screen -> {m_settings.FillScreen}");
+                m_settings.KeepAspect = m_keepAspect.Checked;
+                SaveSettings($"keep aspect -> {m_settings.KeepAspect}");
             };
-            m_optionsMenu.Items.Add(m_fillScreen);
+            m_exitToLogin.Checked = !m_settings.CloseOnExit;
+            m_exitToLogin.CheckedChanged += (s, e) =>
+            {
+                m_settings.CloseOnExit = !m_exitToLogin.Checked;
+                SaveSettings($"close on exit -> {m_settings.CloseOnExit}");
+            };
+            m_optionsMenu.Items.Add(m_keepAspect);
+            m_optionsMenu.Items.Add(m_exitToLogin);
             m_options.Click += (s, e) => m_optionsMenu.Show(m_options, new Point(0, m_options.Height));
             ApplyTexts();
             m_close.Font = m_minimize.Font = new Font("Segoe UI", 10f);
@@ -118,9 +125,17 @@ namespace OriginsLauncher
             m_language.Text = $"{L.S.Language}: {L.S.Code.ToUpperInvariant()}";
             foreach (ToolStripMenuItem item in m_languageMenu.Items)
                 item.Checked = (string) item.Tag == L.S.Code;
-            m_fillScreen.Text = L.S.FillScreen;
+            m_keepAspect.Text = L.S.KeepAspect;
+            m_exitToLogin.Text = L.S.ExitToLogin;
             m_tooltip.SetToolTip(m_options, L.S.Options);
             Invalidate();
+        }
+
+        private void SaveSettings(string what)
+        {
+            try { m_settings.Save(m_config); }
+            catch (Exception ex) { Log.Write($"settings not saved: {ex.Message}"); }
+            Log.Write(what);
         }
 
         /// <summary>Saves the choice and installs that language's files (translated texts + login port).</summary>
@@ -313,6 +328,7 @@ namespace OriginsLauncher
                     // the game registers Flash itself when it can; never block playing for this
                 }
 
+                GameSession.WriteExitToLogin(m_config, !m_settings.CloseOnExit);
                 first = m_updater.StartGame(manifest);
             }
             catch (Exception ex)
@@ -330,7 +346,7 @@ namespace OriginsLauncher
                 var started = first;
                 first = null;
                 return started;
-            }, () => m_settings.FillScreen);
+            }, () => !m_settings.KeepAspect);
             try
             {
                 await session.RunAsync();
