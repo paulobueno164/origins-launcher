@@ -18,6 +18,7 @@ namespace OriginsLauncher
         public string Corrupted, ConnInterrupted, ConnStalled, CannotReplace, Of, Remaining;
         public string InstallTitle, InstallHeading, InstallInfo, Browse, Install, Cancel, PickFolder, InstallFailed;
         public string Options, KeepAspect, ExitToLogin;
+        public string LoginTitle, Account, Password, LogIn, LoginInvalid, LoginConnError;
 
         public static readonly Strings En = new Strings
         {
@@ -56,7 +57,10 @@ namespace OriginsLauncher
             Browse = "Browse...", Install = "Install", Cancel = "Cancel", PickFolder = "Choose the install folder",
             InstallFailed = "Could not install here: {0}",
             Options = "Options", KeepAspect = "Full screen: keep the 4:3 shape (black bars on wide monitors)",
-            ExitToLogin = "Leaving the game goes back to the login screen"
+            ExitToLogin = "Leaving the game goes back to the login screen",
+            LoginTitle = "Log in to Origins", Account = "Account", Password = "Password", LogIn = "Log in",
+            LoginInvalid = "Wrong account or password.",
+            LoginConnError = "Could not reach the login server. Check your internet and try again."
         };
 
         public static readonly Strings Pt = new Strings
@@ -96,7 +100,10 @@ namespace OriginsLauncher
             Browse = "Procurar...", Install = "Instalar", Cancel = "Cancelar", PickFolder = "Escolha a pasta de instalação",
             InstallFailed = "Não foi possível instalar aqui: {0}",
             Options = "Opções", KeepAspect = "Tela cheia: manter o formato 4:3 (barras pretas em monitores largos)",
-            ExitToLogin = "Sair do jogo volta para a tela de login"
+            ExitToLogin = "Sair do jogo volta para a tela de login",
+            LoginTitle = "Entrar no Origins", Account = "Conta", Password = "Senha", LogIn = "Entrar",
+            LoginInvalid = "Conta ou senha incorretos.",
+            LoginConnError = "Não foi possível falar com o servidor de login. Verifique sua internet e tente de novo."
         };
 
         public static readonly Strings Fil = new Strings
@@ -136,7 +143,10 @@ namespace OriginsLauncher
             Browse = "Mag-browse...", Install = "I-install", Cancel = "Kanselahin", PickFolder = "Piliin ang folder ng install",
             InstallFailed = "Hindi ma-install dito: {0}",
             Options = "Options", KeepAspect = "Full screen: panatilihin ang hugis na 4:3 (may itim na gilid sa malapad na monitor)",
-            ExitToLogin = "Ang pag-alis sa laro ay babalik sa login screen"
+            ExitToLogin = "Ang pag-alis sa laro ay babalik sa login screen",
+            LoginTitle = "Mag-login sa Origins", Account = "Account", Password = "Password", LogIn = "Mag-login",
+            LoginInvalid = "Mali ang account o password.",
+            LoginConnError = "Hindi maabot ang login server. I-check ang internet mo at subukan ulit."
         };
 
         public static readonly Strings[] All = {En, Pt, Fil};

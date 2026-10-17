@@ -42,6 +42,8 @@ namespace OriginsLauncher
         private readonly CancellationTokenSource m_cts = new CancellationTokenSource();
         private bool m_busy;
         private Bitmap m_backdrop; // background image + gradients, rendered once per size
+        private string m_loginAccount; // kept for this play session so screen-mode restarts can fetch a fresh token
+        private string m_loginSecret;  // the player's own password, held only for the session; cleared after playing
 
         public MainForm(Config config)
         {
@@ -328,6 +330,11 @@ namespace OriginsLauncher
                     // the game registers Flash itself when it can; never block playing for this
                 }
 
+                // Log in first: the player gives their account and password, the launcher gets a single-use
+                // token from the site and writes it where the client reads it (ini\origins.login).
+                if (!EnsureLogin())
+                    return;
+
                 GameSession.WriteExitToLogin(m_config, !m_settings.CloseOnExit);
                 first = m_updater.StartGame(manifest);
             }
@@ -342,10 +349,15 @@ namespace OriginsLauncher
             Hide();
             var session = new GameSession(m_config, () =>
             {
-                if (first == null) return m_updater.StartGame(manifest);
-                var started = first;
-                first = null;
-                return started;
+                if (first != null)
+                {
+                    var started = first; // the first start already has its token file from EnsureLogin
+                    first = null;
+                    return started;
+                }
+
+                WriteFreshTokenForRestart(); // a mode change restarts the client, which logs in again
+                return m_updater.StartGame(manifest);
             }, () => !m_settings.KeepAspect);
             try
             {
@@ -356,7 +368,45 @@ namespace OriginsLauncher
                 Log.Write($"game session failed: {ex.GetType().Name}: {ex.Message}");
             }
 
+            m_loginSecret = null; // done playing: drop the password held for this session
             Close();
+        }
+
+        /// <summary>
+        ///     Shows the login dialog, keeps the account for this play session and writes the first login token
+        ///     (ini\origins.login). Returns false if the player closed the dialog without logging in.
+        /// </summary>
+        private bool EnsureLogin()
+        {
+            using var dialog = new LoginForm(m_config, m_loginAccount);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return false;
+
+            m_loginAccount = dialog.AccountName;
+            m_loginSecret = dialog.Secret;
+            LoginClient.WriteTokenFile(m_config, dialog.Token);
+            return true;
+        }
+
+        /// <summary>
+        ///     A screen-mode change closes and restarts the client, which shows its login screen again, so it
+        ///     needs a fresh single-use token. Fetches one with the account kept from <see cref="EnsureLogin" />;
+        ///     on a failure the client just can't log in and the player can start again from the launcher.
+        /// </summary>
+        private void WriteFreshTokenForRestart()
+        {
+            if (m_loginAccount == null || m_loginSecret == null)
+                return;
+            try
+            {
+                string token = LoginClient.RequestTokenAsync(m_config, m_loginAccount, m_loginSecret)
+                    .GetAwaiter().GetResult();
+                LoginClient.WriteTokenFile(m_config, token);
+            }
+            catch (Exception ex)
+            {
+                Log.Write($"could not refresh the login token for the restart: {ex.Message}");
+            }
         }
 
         private void SetStatus(string status, string detail, double fraction, Color? color = null)
