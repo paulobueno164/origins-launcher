@@ -17,7 +17,6 @@ namespace OriginsLauncher
         public string UninstallTitle, UninstallConfirm, UninstallGameOpen, UninstallDone;
         public string Corrupted, ConnInterrupted, ConnStalled, CannotReplace, Of, Remaining;
         public string InstallTitle, InstallHeading, InstallInfo, Browse, Install, Cancel, PickFolder, InstallFailed;
-        public string Options, KeepAspect, ExitToLogin;
         public string LoginTitle, Account, Password, LogIn, LoginInvalid, LoginConnError;
 
         public static readonly Strings En = new Strings
@@ -35,7 +34,7 @@ namespace OriginsLauncher
             GameOpen = "The game is running.", UpdateError = "Error updating the game.",
             ServerSlow = "The server took too long to answer.", TryAgain = "Click \"Verify files\" to try again.",
             CannotStart = "Could not start the game.",
-            Subtitle = "CLASSIC CONQUER  ·  PATCH 5095", News = "NEWS",
+            Subtitle = "CLASSIC CONQUER  ·  PATCH 6609", News = "NEWS",
             Welcome = "Welcome to Origins Conquer! Server news shows up here.",
             ClientVersion = "Client v{0}", DateFormat = "MM/dd/yyyy",
             VerifyingFiles = "Verifying files...", VerifyingDetail = "{0} of {1}: {2}",
@@ -49,15 +48,13 @@ namespace OriginsLauncher
             CannotReplace = "Could not replace {0}. Close the game and try again.",
             Of = "{0} of {1}", Remaining = "{0} left",
             InstallTitle = "Install Origins Conquer", InstallHeading = "Where do you want to install the game?",
-            InstallInfo = "The launcher downloads the game into this folder (about 450 MB to download, 1.3 GB installed), creates desktop and Start menu shortcuts, adds Origins Conquer to Windows' installed apps (to uninstall) and, if Windows has no Flash, registers the game's Flash component for your user.",
+            InstallInfo = "The launcher downloads the game into this folder (about 1.8 GB to download, 4.1 GB installed), creates desktop and Start menu shortcuts, adds Origins Conquer to Windows' installed apps (to uninstall) and, if Windows has no Flash, registers the game's Flash component for your user.",
             UninstallTitle = "Uninstall Origins Conquer",
             UninstallConfirm = "Remove Origins Conquer from this computer?\n\nThe game files in {0}, the shortcuts and the launcher will be deleted. Files you added to the folder are kept.",
             UninstallGameOpen = "Close the game before uninstalling.",
             UninstallDone = "Origins Conquer was removed.",
             Browse = "Browse...", Install = "Install", Cancel = "Cancel", PickFolder = "Choose the install folder",
             InstallFailed = "Could not install here: {0}",
-            Options = "Options", KeepAspect = "Full screen: keep the 4:3 shape (black bars on wide monitors)",
-            ExitToLogin = "Leaving the game goes back to the login screen",
             LoginTitle = "Log in to Origins", Account = "Account", Password = "Password", LogIn = "Log in",
             LoginInvalid = "Wrong account or password.",
             LoginConnError = "Could not reach the login server. Check your internet and try again."
@@ -78,7 +75,7 @@ namespace OriginsLauncher
             GameOpen = "O jogo está aberto.", UpdateError = "Erro ao atualizar o jogo.",
             ServerSlow = "O servidor demorou para responder.", TryAgain = "Clique em \"Verificar arquivos\" para tentar de novo.",
             CannotStart = "Não foi possível abrir o jogo.",
-            Subtitle = "CONQUER CLÁSSICO  ·  VERSÃO 5095", News = "NOTÍCIAS",
+            Subtitle = "CONQUER CLÁSSICO  ·  VERSÃO 6609", News = "NOTÍCIAS",
             Welcome = "Bem-vindo ao Origins Conquer! Novidades do servidor aparecem aqui.",
             ClientVersion = "Cliente v{0}", DateFormat = "dd/MM/yyyy",
             VerifyingFiles = "Verificando arquivos...", VerifyingDetail = "{0} de {1}: {2}",
@@ -92,15 +89,13 @@ namespace OriginsLauncher
             CannotReplace = "Não foi possível substituir {0}. Feche o jogo e tente de novo.",
             Of = "{0} de {1}", Remaining = "{0} restantes",
             InstallTitle = "Instalar Origins Conquer", InstallHeading = "Onde instalar o jogo?",
-            InstallInfo = "O launcher baixa o jogo para esta pasta (cerca de 450 MB de download, 1,3 GB instalado), cria atalhos na área de trabalho e no menu Iniciar, adiciona o Origins Conquer aos aplicativos instalados do Windows (para desinstalar) e, se o Windows não tiver Flash, registra o componente Flash do jogo para o seu usuário.",
+            InstallInfo = "O launcher baixa o jogo para esta pasta (cerca de 1,8 GB de download, 4,1 GB instalado), cria atalhos na área de trabalho e no menu Iniciar, adiciona o Origins Conquer aos aplicativos instalados do Windows (para desinstalar) e, se o Windows não tiver Flash, registra o componente Flash do jogo para o seu usuário.",
             UninstallTitle = "Desinstalar Origins Conquer",
             UninstallConfirm = "Remover o Origins Conquer deste computador?\n\nOs arquivos do jogo em {0}, os atalhos e o launcher serão apagados. Arquivos que você colocou na pasta são mantidos.",
             UninstallGameOpen = "Feche o jogo antes de desinstalar.",
             UninstallDone = "O Origins Conquer foi removido.",
             Browse = "Procurar...", Install = "Instalar", Cancel = "Cancelar", PickFolder = "Escolha a pasta de instalação",
             InstallFailed = "Não foi possível instalar aqui: {0}",
-            Options = "Opções", KeepAspect = "Tela cheia: manter o formato 4:3 (barras pretas em monitores largos)",
-            ExitToLogin = "Sair do jogo volta para a tela de login",
             LoginTitle = "Entrar no Origins", Account = "Conta", Password = "Senha", LogIn = "Entrar",
             LoginInvalid = "Conta ou senha incorretos.",
             LoginConnError = "Não foi possível falar com o servidor de login. Verifique sua internet e tente de novo."
@@ -121,7 +116,7 @@ namespace OriginsLauncher
             GameOpen = "Bukas pa ang laro.", UpdateError = "May error sa pag-update ng laro.",
             ServerSlow = "Masyadong matagal sumagot ang server.", TryAgain = "I-click ang \"I-check ang files\" para subukan ulit.",
             CannotStart = "Hindi mabuksan ang laro.",
-            Subtitle = "CLASSIC CONQUER  ·  PATCH 5095", News = "BALITA",
+            Subtitle = "CLASSIC CONQUER  ·  PATCH 6609", News = "BALITA",
             Welcome = "Maligayang pagdating sa Origins Conquer! Dito lalabas ang mga balita ng server.",
             ClientVersion = "Client v{0}", DateFormat = "MM/dd/yyyy",
             VerifyingFiles = "Vine-verify ang files...", VerifyingDetail = "{0} sa {1}: {2}",
@@ -135,15 +130,13 @@ namespace OriginsLauncher
             CannotReplace = "Hindi mapalitan ang {0}. Isara ang laro at subukan ulit.",
             Of = "{0} sa {1}", Remaining = "{0} na lang",
             InstallTitle = "I-install ang Origins Conquer", InstallHeading = "Saan mo gustong i-install ang laro?",
-            InstallInfo = "Ida-download ng launcher ang laro sa folder na ito (mga 450 MB na download, 1.3 GB kapag naka-install), gagawa ng shortcut sa desktop at sa Start menu, idadagdag ang Origins Conquer sa mga naka-install na app ng Windows (para ma-uninstall) at, kung walang Flash ang Windows, ire-register ang Flash component ng laro para sa user mo.",
+            InstallInfo = "Ida-download ng launcher ang laro sa folder na ito (mga 1.8 GB na download, 4.1 GB kapag naka-install), gagawa ng shortcut sa desktop at sa Start menu, idadagdag ang Origins Conquer sa mga naka-install na app ng Windows (para ma-uninstall) at, kung walang Flash ang Windows, ire-register ang Flash component ng laro para sa user mo.",
             UninstallTitle = "I-uninstall ang Origins Conquer",
             UninstallConfirm = "Alisin ang Origins Conquer sa computer na ito?\n\nBuburahin ang mga file ng laro sa {0}, ang mga shortcut at ang launcher. Hindi gagalawin ang mga file na idinagdag mo sa folder.",
             UninstallGameOpen = "Isara muna ang laro bago mag-uninstall.",
             UninstallDone = "Naalis na ang Origins Conquer.",
             Browse = "Mag-browse...", Install = "I-install", Cancel = "Kanselahin", PickFolder = "Piliin ang folder ng install",
             InstallFailed = "Hindi ma-install dito: {0}",
-            Options = "Options", KeepAspect = "Full screen: panatilihin ang hugis na 4:3 (may itim na gilid sa malapad na monitor)",
-            ExitToLogin = "Ang pag-alis sa laro ay babalik sa login screen",
             LoginTitle = "Mag-login sa Origins", Account = "Account", Password = "Password", LogIn = "Mag-login",
             LoginInvalid = "Mali ang account o password.",
             LoginConnError = "Hindi maabot ang login server. I-check ang internet mo at subukan ulit."
@@ -179,17 +172,11 @@ namespace OriginsLauncher
     [DataContract]
     internal sealed class Settings
     {
+        /// <remarks>
+        ///     The only setting since 2.0.0. The 5095 launcher's "keepAspect" (Magpie full screen), "closeOnExit" (the
+        ///     5095 exe's ExitToLogin patch) and 1.4.0's "fillScreen" keys are ignored when read and dropped on the next save.
+        /// </remarks>
         [DataMember(Name = "language")] public string Language { get; set; }
-
-        /// <summary>
-        ///     Full screen keeps the game's 4:3 shape (black bars on wide monitors) instead of filling the monitor. Off by
-        ///     default since 1.5.0 (QA 5: "the full screen must have no black bars, on any monitor"); 1.4.0's opt-in
-        ///     "fillScreen" key is no longer read, so everyone starts filled.
-        /// </summary>
-        [DataMember(Name = "keepAspect")] public bool KeepAspect { get; set; }
-
-        /// <summary>Leaving the game from the world shows the login screen again (client [Origins] ExitToLogin). Default on.</summary>
-        [DataMember(Name = "closeOnExit")] public bool CloseOnExit { get; set; }
 
         public static Settings Load(Config config)
         {

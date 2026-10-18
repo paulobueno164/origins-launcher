@@ -23,11 +23,6 @@ namespace OriginsLauncher
         private readonly GoldButton m_check = new GoldButton();
         private readonly GoldButton m_language = new GoldButton();
         private readonly ContextMenuStrip m_languageMenu = new ContextMenuStrip();
-        private readonly GoldButton m_options = new GoldButton {Text = "⚙"};
-        private readonly ContextMenuStrip m_optionsMenu = new ContextMenuStrip();
-        private readonly ToolStripMenuItem m_keepAspect = new ToolStripMenuItem {CheckOnClick = true};
-        private readonly ToolStripMenuItem m_exitToLogin = new ToolStripMenuItem {CheckOnClick = true};
-        private readonly ToolTip m_tooltip = new ToolTip();
         private readonly Settings m_settings;
         private bool m_recheckAfterBusy;
         private readonly GoldButton m_close = new GoldButton {Text = "✕"};
@@ -85,29 +80,12 @@ namespace OriginsLauncher
             }
 
             m_language.Click += (s, e) => m_languageMenu.Show(m_language, new Point(0, m_language.Height));
-            // options: full screen fills the monitor unless "keep 4:3" is ticked; leaving the game shows the login
-            // screen unless "go back to login" is unticked
-            m_options.SetBounds(630, 12, 32, 28);
-            m_options.Font = new Font("Segoe UI Symbol", 10f);
-            m_keepAspect.Checked = m_settings.KeepAspect;
-            m_keepAspect.CheckedChanged += (s, e) =>
-            {
-                m_settings.KeepAspect = m_keepAspect.Checked;
-                SaveSettings($"keep aspect -> {m_settings.KeepAspect}");
-            };
-            m_exitToLogin.Checked = !m_settings.CloseOnExit;
-            m_exitToLogin.CheckedChanged += (s, e) =>
-            {
-                m_settings.CloseOnExit = !m_exitToLogin.Checked;
-                SaveSettings($"close on exit -> {m_settings.CloseOnExit}");
-            };
-            m_optionsMenu.Items.Add(m_keepAspect);
-            m_optionsMenu.Items.Add(m_exitToLogin);
-            m_options.Click += (s, e) => m_optionsMenu.Show(m_options, new Point(0, m_options.Height));
+            // 2.0.0: no options menu any more. Its two items were 5095-only (Magpie full screen "keep 4:3" and the
+            // exe patch "leaving the game goes back to login"); the 6609 client has native resolutions.
             ApplyTexts();
             m_close.Font = m_minimize.Font = new Font("Segoe UI", 10f);
             m_play.Enabled = false;
-            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language, m_options});
+            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language});
 
             m_play.Click += (s, e) => PlayGame();
             m_site.Click += (s, e) => OpenUrl(m_config.SiteUrl);
@@ -127,20 +105,13 @@ namespace OriginsLauncher
             m_language.Text = $"{L.S.Language}: {L.S.Code.ToUpperInvariant()}";
             foreach (ToolStripMenuItem item in m_languageMenu.Items)
                 item.Checked = (string) item.Tag == L.S.Code;
-            m_keepAspect.Text = L.S.KeepAspect;
-            m_exitToLogin.Text = L.S.ExitToLogin;
-            m_tooltip.SetToolTip(m_options, L.S.Options);
             Invalidate();
         }
 
-        private void SaveSettings(string what)
-        {
-            try { m_settings.Save(m_config); }
-            catch (Exception ex) { Log.Write($"settings not saved: {ex.Message}"); }
-            Log.Write(what);
-        }
-
-        /// <summary>Saves the choice and installs that language's files (translated texts + login port).</summary>
+        /// <summary>
+        ///     Saves the choice and installs that language's files (translated texts); the language's login port
+        ///     goes to ini\origins.server when the game starts.
+        /// </summary>
         private async void ChangeLanguage(string code)
         {
             if (code == L.S.Code) return;
@@ -206,7 +177,7 @@ namespace OriginsLauncher
                     // HttpClient reports its own timeout as a cancellation; only a real close is silent.
                     Log.Write($"manifest failed: {ex.GetType().Name}: {ex.Message}");
                     m_manifest = m_updater.LoadLocalManifest();
-                    if (m_updater.GameFilesPresent(m_manifest?.GameExe ?? "Conquer.exe"))
+                    if (m_updater.GameFilesPresent(m_manifest?.GameExe ?? Manifest.DefaultGameExe))
                     {
                         SetStatus(L.S.ServerDown, L.S.ServerDownPlay, 1, Theme.Error);
                         m_play.Enabled = true;
@@ -231,30 +202,7 @@ namespace OriginsLauncher
                     return;
                 }
 
-                var wanted = m_manifest.FilesFor(L.S.Code);
-                var outdated = await m_updater.FindOutdatedAsync(wanted, fullCheck, progress, ct);
-                int updated = outdated.Count;
-                Log.Write($"check lang={L.S.Code} full={fullCheck}: {outdated.Count} outdated, {outdated.Sum(f => f.GzSize)} bytes to download");
-                if (Updater.ShouldUsePack(m_manifest, outdated))
-                {
-                    try
-                    {
-                        await m_updater.InstallPackAsync(m_manifest.Pack, outdated, progress, ct);
-                    }
-                    catch (Exception ex) when (!(ex is GameRunningException) && !(ex is OperationCanceledException && ct.IsCancellationRequested))
-                    {
-                        // e.g. the pack was replaced on the server mid-download: single files still work
-                        Log.Write($"pack failed, downloading single files: {ex.GetType().Name}: {ex.Message}");
-                    }
-
-                    outdated = await m_updater.FindOutdatedAsync(wanted, false, progress, ct);
-                    Log.Write($"after pack: {outdated.Count} outdated, {outdated.Sum(f => f.GzSize)} bytes to download");
-                }
-
-                if (outdated.Count > 0)
-                    await m_updater.DownloadAsync(outdated, progress, ct);
-                Log.Write("up to date");
-                m_updater.SaveLocalManifest(m_manifest);
+                int updated = await m_updater.UpdateGameAsync(m_manifest, L.S.Code, fullCheck, progress, ct);
 
                 SetStatus(L.S.Ready, updated > 0 ? string.Format(L.S.FilesUpdated, updated) : L.S.UpToDate, 1, Theme.Ok);
                 m_play.Enabled = true;
@@ -317,7 +265,7 @@ namespace OriginsLauncher
         private async void PlayGame()
         {
             if (m_manifest == null && !m_updater.GameFilesPresent()) return;
-            var manifest = m_manifest ?? new Manifest {GameExe = "Conquer.exe", GameArgs = "blacknull"};
+            var manifest = m_manifest ?? Manifest.Fallback();
             Process first;
             try
             {
@@ -335,8 +283,8 @@ namespace OriginsLauncher
                 if (!EnsureLogin())
                     return;
 
-                GameSession.WriteExitToLogin(m_config, !m_settings.CloseOnExit);
-                first = m_updater.StartGame(manifest);
+                // ini\origins.server = this language's login port, then Env_DX9\Conquer.exe blacknull
+                first = m_updater.StartGame(manifest, L.S.Code);
             }
             catch (Exception ex)
             {
@@ -344,8 +292,8 @@ namespace OriginsLauncher
                 return;
             }
 
-            // The launcher stays in the background while the game runs: full screen (Magpie) and
-            // the restart after the game's Window/Full Screen buttons are handled by the session.
+            // The launcher stays in the background while the game runs: the restart after the game's
+            // graphics-mode change is handled by the session.
             Hide();
             var session = new GameSession(m_config, () =>
             {
@@ -357,8 +305,8 @@ namespace OriginsLauncher
                 }
 
                 WriteFreshTokenForRestart(); // a mode change restarts the client, which logs in again
-                return m_updater.StartGame(manifest);
-            }, () => !m_settings.KeepAspect);
+                return m_updater.StartGame(manifest, L.S.Code);
+            });
             try
             {
                 await session.RunAsync();

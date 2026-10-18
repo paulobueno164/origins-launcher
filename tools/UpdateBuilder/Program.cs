@@ -5,9 +5,17 @@
 //   <out>/pack/<id>.NN.bin + .index.json the files/*.gz of the client concatenated, for first installs
 //                                        (--repack forces a new one, --pack-part-mb sets the part size)
 //
-// Usage: UpdateBuilder --source C:\conquer\client\5095 --out C:\conquer\site-data\updates
-//                      --launcher ...\OriginsLauncher.exe [--lang-root C:\conquer\client-lang] [--game-args blacknull] [--dry-run]
+// Usage: UpdateBuilder --source C:\conquer\client\6609 --out C:\conquer\site-data\updates-6609-staging
+//                      --launcher ...\OriginsLauncher.exe --account-ports en=9958,pt=9959,fil=9960
+//                      [--lang-root C:\conquer\client-lang-6609 --lang-codes pt,fil] [--account-host <ip>]
+//                      [--game-exe Env_DX9\Conquer.exe] [--working-dir Env_DX9] [--game-args blacknull] [--dry-run]
 //   <out>/files/lang/<code>/<path>.gz   language packs: translated files replacing <path> (manifest "languages")
+//   manifest "accountServers"           host:port per language, written by the launcher to ini\origins.server before
+//                                        each start; the host is the one the client build put in the source's
+//                                        ini\origins.server (build-client-6609.ps1 -ServerIp) unless --account-host
+//
+// The source is published as it is (the client build decides what ships): no file of it is left out. It is only
+// read: client\6609 is mostly hardlinks to client\originals-6609.
 
 using System.Diagnostics;
 using System.IO.Compression;
@@ -19,11 +27,40 @@ var options = ParseArgs(args);
 string source = Path.GetFullPath(Require(options, "source"));
 string output = Path.GetFullPath(Require(options, "out"));
 string launcher = Path.GetFullPath(Require(options, "launcher"));
+string gameExe = options.GetValueOrDefault("game-exe", @"Env_DX9\Conquer.exe");
+string workingDir = options.GetValueOrDefault("working-dir", "Env_DX9");
 string gameArgs = options.GetValueOrDefault("game-args", "blacknull");
 bool dryRun = options.ContainsKey("dry-run");
 
-if (!File.Exists(Path.Combine(source, "Conquer.exe"))) Fail($"{source} has no Conquer.exe");
+if (!File.Exists(Path.Combine(source, gameExe))) Fail($"{source} has no {gameExe}");
+if (!Directory.Exists(Path.Combine(source, workingDir))) Fail($"{source} has no folder {workingDir}");
 if (!File.Exists(launcher)) Fail($"launcher not found: {launcher}");
+
+// ---------------------------------------------------------------- account servers
+// One address per language: the IP lives only in the client build's ini\origins.server (or --account-host), the
+// ports come from the account server's config (publish-update.ps1 reads Network.Port and LanguagePorts).
+
+const string ServerFile = @"ini\origins.server";
+var accountServers = new Dictionary<string, string>();
+{
+    string serverFile = Path.Combine(source, ServerFile);
+    if (!File.Exists(serverFile)) Fail($"{source} has no {ServerFile}");
+    string built = File.ReadAllText(serverFile).Trim();
+    int colon = built.LastIndexOf(':');
+    if (colon <= 0) Fail($"{ServerFile} is not host:port: {built}");
+    string host = options.GetValueOrDefault("account-host", built[..colon]);
+    string ports = Require(options, "account-ports");
+    foreach (string pair in ports.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        var kv = pair.Split('=');
+        if (kv.Length != 2 || !ushort.TryParse(kv[1], out ushort port) || port == 0) Fail($"bad --account-ports entry {pair}");
+        accountServers[kv[0].ToLowerInvariant()] = $"{host}:{kv[1]}";
+    }
+
+    if (!accountServers.TryGetValue("en", out string? en)) Fail("--account-ports needs en=<port>");
+    if (en != built && !options.ContainsKey("account-host"))
+        Fail($"{ServerFile} of the client is {built} but the English account server is {en}: build the client with that port");
+}
 
 string filesDir = Path.Combine(output, "files");
 string manifestPath = Path.Combine(output, "manifest.json");
@@ -104,7 +141,15 @@ var languages = new Dictionary<string, List<ManifestFile>>();
 string? langRoot = options.GetValueOrDefault("lang-root");
 if (langRoot != null && Directory.Exists(langRoot))
 {
-    foreach (var langDir in Directory.GetDirectories(langRoot).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+    // --lang-codes: only these subfolders (client-lang-6609 also holds server\ with the server's own files)
+    var codes = options.TryGetValue("lang-codes", out string? codeList)
+        ? codeList.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
+        : null;
+    var langDirs = codes == null
+        ? Directory.GetDirectories(langRoot).ToList()
+        : codes.Select(c => Path.Combine(langRoot, c)).ToList();
+    foreach (var missing in langDirs.Where(d => !Directory.Exists(d))) Fail($"no language folder {missing}");
+    foreach (var langDir in langDirs.OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
     {
         string code = Path.GetFileName(langDir).ToLowerInvariant();
         var rels = Directory.EnumerateFiles(langDir, "*", SearchOption.AllDirectories)
@@ -113,6 +158,9 @@ if (langRoot != null && Directory.Exists(langRoot))
             .ToList();
         var unknown = rels.Where(rel => !paths.Contains(rel, StringComparer.OrdinalIgnoreCase)).ToList();
         if (unknown.Count > 0) Fail($"language {code} has files the client does not: {string.Join(", ", unknown)}");
+        if (rels.Contains(ServerFile, StringComparer.OrdinalIgnoreCase))
+            Fail($"language {code} has {ServerFile}: the launcher writes it from accountServers");
+        if (!accountServers.ContainsKey(code)) Fail($"language {code} has no account server port (--account-ports {code}=<port>)");
         var before = previous?.Languages?.GetValueOrDefault(code)?.ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase)
                      ?? new Dictionary<string, ManifestFile>(StringComparer.OrdinalIgnoreCase);
         languages[code] = (await PackAsync(langDir, rels, $"lang/{code}/", before, false)).ToList();
@@ -241,8 +289,10 @@ var manifest = new Manifest
     LauncherVersion = launcherVersion,
     LauncherSha256 = launcherSha,
     LauncherUrl = "launcher/OriginsLauncher.exe",
-    GameExe = "Conquer.exe",
+    GameExe = gameExe,
     GameArgs = gameArgs,
+    WorkingDir = workingDir,
+    AccountServers = accountServers,
     Files = entries.ToList(),
     Languages = languages.Count > 0 ? languages : null,
     Pack = pack
@@ -251,6 +301,8 @@ var manifest = new Manifest
 bool changed = previous == null ||
                previous.LauncherSha256 != manifest.LauncherSha256 ||
                previous.GameExe != manifest.GameExe || previous.GameArgs != manifest.GameArgs ||
+               previous.WorkingDir != manifest.WorkingDir ||
+               ServersKey(previous.AccountServers) != ServersKey(manifest.AccountServers) ||
                previous.Files.Count != manifest.Files.Count ||
                previous.Files.Zip(manifest.Files).Any(pair =>
                    !string.Equals(pair.First.Path, pair.Second.Path, StringComparison.OrdinalIgnoreCase) ||
@@ -282,19 +334,21 @@ return 0;
 
 // ---------------------------------------------------------------- helpers
 
+static string ServersKey(Dictionary<string, string>? servers) =>
+    servers == null ? "" : string.Join("|", servers.OrderBy(p => p.Key).Select(p => $"{p.Key}={p.Value}"));
+
 static string LanguagesKey(Dictionary<string, List<ManifestFile>>? packs) =>
     packs == null ? "" : string.Join("|", packs.OrderBy(p => p.Key).SelectMany(p => p.Value.OrderBy(f => f.Path).Select(f => $"{p.Key}:{f.Path}:{f.Sha256}")));
 
 
+// What ships is decided by the client build (scripts\client-6609\mirror.txt leaves out TQ's launcher, patcher,
+// uninstaller, help pages, Env_DX8 ...); only the launcher's own files never go in the manifest.
 static bool Excluded(string rel)
 {
-    string top = rel.Split(Path.DirectorySeparatorChar)[0];
-    if (ExcludedDirs.Contains(top) && rel.Contains(Path.DirectorySeparatorChar)) return true;
-    if (ExcludedSubDirs.Any(d => rel.StartsWith(d + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) return true;
     string name = Path.GetFileName(rel);
-    return ExcludedFiles.Contains(rel) ||
-           name.EndsWith(".originstmp", StringComparison.OrdinalIgnoreCase) ||
-           name.StartsWith("OriginsLauncher", StringComparison.OrdinalIgnoreCase);
+    return name.EndsWith(".originstmp", StringComparison.OrdinalIgnoreCase) ||
+           name.StartsWith("OriginsLauncher", StringComparison.OrdinalIgnoreCase) ||
+           rel.Split(Path.DirectorySeparatorChar)[0].Equals(".originsupdate", StringComparison.OrdinalIgnoreCase);
 }
 
 static async Task<string> HashAsync(string path, CancellationToken ct)
@@ -349,18 +403,10 @@ static string Fail(string message)
 
 partial class Program
 {
-    // Logs, TQ's own patcher and shortcuts to TQ sites never ship.
-    private static readonly HashSet<string> ExcludedDirs = new(StringComparer.OrdinalIgnoreCase) {"LOG", "debug", "AutoPatch"};
-
-    // Written at run time by the full screen scaler (the launcher fills config\ from origins-config.json).
-    private static readonly string[] ExcludedSubDirs = [@"Magpie\config", @"Magpie\cache", @"Magpie\logs"];
-
-    private static readonly HashSet<string> ExcludedFiles = new(StringComparer.OrdinalIgnoreCase)
-        {"AutoPatch.exe", "AutoPatch.dat", "1.url", "2.url", @"Help\credit.exe"}; // credit.exe: TQ's credits program, unused
-
-    // Files the game writes with the player's own settings: installed once, never overwritten.
+    // Installed once, never overwritten: the player's settings (the game writes ini\GameSetUp.ini) and the account
+    // server address, which the launcher rewrites for the chosen language before every start.
     private static readonly HashSet<string> KeepFiles = new(StringComparer.OrdinalIgnoreCase)
-        {@"ini\GameSetUp.ini", @"zftqat\krt.ini"};
+        {@"ini\GameSetUp.ini", @"ini\origins.server"};
 }
 
 internal sealed class Manifest
@@ -372,6 +418,8 @@ internal sealed class Manifest
     [JsonPropertyName("launcherUrl")] public string LauncherUrl { get; set; } = "";
     [JsonPropertyName("gameExe")] public string GameExe { get; set; } = "";
     [JsonPropertyName("gameArgs")] public string GameArgs { get; set; } = "";
+    [JsonPropertyName("workingDir")] public string? WorkingDir { get; set; }
+    [JsonPropertyName("accountServers")] public Dictionary<string, string>? AccountServers { get; set; }
     [JsonPropertyName("files")] public List<ManifestFile> Files { get; set; } = new();
     [JsonPropertyName("languages")] public Dictionary<string, List<ManifestFile>>? Languages { get; set; }
     [JsonPropertyName("pack")] public PackInfo? Pack { get; set; }

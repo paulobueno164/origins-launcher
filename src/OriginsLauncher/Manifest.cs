@@ -20,13 +20,28 @@ namespace OriginsLauncher
         [DataMember(Name = "launcherVersion")] public string LauncherVersion { get; set; }
         [DataMember(Name = "launcherSha256")] public string LauncherSha256 { get; set; }
         [DataMember(Name = "launcherUrl")] public string LauncherUrl { get; set; }
+        /// <summary>The game's exe relative to the game folder (6609: Env_DX9\Conquer.exe).</summary>
         [DataMember(Name = "gameExe")] public string GameExe { get; set; }
         [DataMember(Name = "gameArgs")] public string GameArgs { get; set; }
+
+        /// <summary>
+        ///     The game's working directory relative to the game folder (6609: Env_DX9; the exe itself then moves
+        ///     to the folder above it). Missing (older manifests): the exe's own folder.
+        /// </summary>
+        [DataMember(Name = "workingDir")] public string WorkingDir { get; set; }
+
+        /// <summary>
+        ///     The account server ("host:port") per language code ("en", "pt", "fil"): the launcher writes the
+        ///     chosen language's address to ini\origins.server before every start (the patched 6609 client logs in
+        ///     there; each port answers in its language). Filled by the publish step (UpdateBuilder), never in code.
+        /// </summary>
+        [DataMember(Name = "accountServers")] public Dictionary<string, string> AccountServers { get; set; }
+
         [DataMember(Name = "files")] public List<ManifestFile> Files { get; set; } = new List<ManifestFile>();
 
         /// <summary>
         ///     Language packs ("pt", "fil"): files that replace the English ones of the same path
-        ///     (translated texts and a Server.dat that logs in through the language's port).
+        ///     (translated texts; the login port comes from <see cref="AccountServers" />).
         /// </summary>
         [DataMember(Name = "languages")] public Dictionary<string, List<ManifestFile>> Languages { get; set; }
 
@@ -36,6 +51,28 @@ namespace OriginsLauncher
         ///     only files whose hash still matches are taken from it.
         /// </summary>
         [DataMember(Name = "pack")] public PackInfo Pack { get; set; }
+
+        // How the 6609 client starts when no manifest was ever saved (offline first start).
+        public const string DefaultGameExe = @"Env_DX9\Conquer.exe";
+        public const string DefaultGameArgs = "blacknull";
+        public const string DefaultWorkingDir = "Env_DX9";
+
+        public static Manifest Fallback() =>
+            new Manifest {GameExe = DefaultGameExe, GameArgs = DefaultGameArgs, WorkingDir = DefaultWorkingDir};
+
+        /// <summary>
+        ///     Every path this manifest installs, in any language (English files and all language packs): what the
+        ///     launcher owns in the game folder.
+        /// </summary>
+        public HashSet<string> AllPaths()
+        {
+            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in Files ?? new List<ManifestFile>()) paths.Add(file.Path);
+            foreach (var pack in Languages?.Values ?? Enumerable.Empty<List<ManifestFile>>())
+            foreach (var file in pack ?? new List<ManifestFile>())
+                paths.Add(file.Path);
+            return paths;
+        }
 
         /// <summary>The file list for <paramref name="language" />: English files with the pack's replacing them.</summary>
         public List<ManifestFile> FilesFor(string language)
@@ -59,8 +96,10 @@ namespace OriginsLauncher
         [DataMember(Name = "gzSize")] public long GzSize { get; set; }
 
         /// <summary>
-        ///     Files the game itself changes (e.g. ini\GameSetUp.ini with the player's settings):
-        ///     installed when missing, never overwritten afterwards.
+        ///     Files the game itself changes (e.g. ini\GameSetUp.ini with the player's settings) or the
+        ///     launcher rewrites (ini\origins.server, per language): installed when missing, never
+        ///     overwritten afterwards (except once when the manifest switches to another client, see
+        ///     <see cref="Updater.IsNewClient" />).
         /// </summary>
         [DataMember(Name = "keep")] public bool Keep { get; set; }
 
@@ -106,7 +145,7 @@ namespace OriginsLauncher
         [DataMember(Name = "text")] public string Text { get; set; }
     }
 
-    /// <summary>Per-file hash cache so a normal start does not re-hash 1.3 GB.</summary>
+    /// <summary>Per-file hash cache so a normal start does not re-hash 4 GB.</summary>
     [DataContract]
     public sealed class HashCache
     {
@@ -129,7 +168,9 @@ namespace OriginsLauncher
 
         public static T Parse<T>(byte[] utf8)
         {
-            using (var ms = new MemoryStream(utf8))
+            // a UTF-8 BOM (a settings.json saved by Notepad) makes the serializer throw
+            int start = utf8.Length >= 3 && utf8[0] == 0xEF && utf8[1] == 0xBB && utf8[2] == 0xBF ? 3 : 0;
+            using (var ms = new MemoryStream(utf8, start, utf8.Length - start))
                 return (T) new DataContractJsonSerializer(typeof(T), Settings).ReadObject(ms);
         }
 

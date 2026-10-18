@@ -58,12 +58,40 @@ namespace OriginsLauncher
 
         // ------------------------------------------------------------------ remote data
 
+        /// <summary>ETag of the manifest last fetched with a 200 (saved with it by <see cref="SaveLocalManifest" />).</summary>
+        private string m_fetchedEtag;
+
+        /// <summary>
+        ///     The published manifest. The 6609 client is ~110k files, so the manifest is a few MB even compressed:
+        ///     when the game folder is up to date with a manifest of a known ETag, the request is conditional and a
+        ///     304 reuses the saved copy.
+        /// </summary>
         public async Task<Manifest> FetchManifestAsync(CancellationToken ct)
         {
-            using (var response = await Http.GetAsync(m_config.ManifestUrl, ct).ConfigureAwait(false))
+            var request = new HttpRequestMessage(HttpMethod.Get, m_config.ManifestUrl);
+            string savedEtag = File.Exists(LocalManifestPath) && File.Exists(LocalEtagPath) ? ReadEtag() : null;
+            if (savedEtag != null && EntityTagHeaderValue.TryParse(savedEtag, out var tag))
+                request.Headers.IfNoneMatch.Add(tag);
+
+            // headers first: the body (a few MB) is read with the stall timeout, not HttpClient's 60 s for the whole
+            // response, so a slow line still gets it
+            using (var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
             {
-                response.EnsureSuccessStatusCode();
-                var manifest = Json.Parse<Manifest>(await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false));
+                Manifest manifest;
+                if (response.StatusCode == HttpStatusCode.NotModified && savedEtag != null)
+                {
+                    manifest = LoadLocalManifest();
+                    m_fetchedEtag = savedEtag;
+                    Log.Write("manifest not modified (304): using the saved one");
+                    if (manifest == null) throw new InvalidDataException(L.S.BadManifest);
+                }
+                else
+                {
+                    response.EnsureSuccessStatusCode();
+                    manifest = Json.Parse<Manifest>(await ReadBodyAsync(response, ct).ConfigureAwait(false));
+                    m_fetchedEtag = response.Headers.ETag?.ToString();
+                }
+
                 if (manifest?.Files == null || string.IsNullOrEmpty(manifest.GameExe))
                     throw new InvalidDataException(L.S.BadManifest);
                 foreach (var file in manifest.Files.Concat(manifest.Languages?.Values.SelectMany(p => p ?? new List<ManifestFile>()) ?? Enumerable.Empty<ManifestFile>()))
@@ -73,6 +101,28 @@ namespace OriginsLauncher
                 }
                 return manifest;
             }
+        }
+
+        /// <summary>The whole body of a response sent with ResponseHeadersRead, aborted only if it stops arriving.</summary>
+        private static async Task<byte[]> ReadBodyAsync(HttpResponseMessage response, CancellationToken ct)
+        {
+            using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+            using (var output = new MemoryStream())
+            {
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await ReadWithStallTimeoutAsync(input, buffer, ct).ConfigureAwait(false)) > 0)
+                    output.Write(buffer, 0, read);
+                return output.ToArray();
+            }
+        }
+
+        private string LocalEtagPath => Path.Combine(m_config.StateDir, "manifest.etag");
+
+        private string ReadEtag()
+        {
+            try { return File.ReadAllText(LocalEtagPath, Encoding.ASCII).Trim(); }
+            catch (Exception) { return null; }
         }
 
         /// <summary>Last manifest the game was fully updated to; lets the game start while offline.</summary>
@@ -91,7 +141,10 @@ namespace OriginsLauncher
         public void SaveLocalManifest(Manifest manifest)
         {
             Directory.CreateDirectory(m_config.StateDir);
+            if (File.Exists(LocalEtagPath)) File.Delete(LocalEtagPath); // never an ETag next to another manifest
             File.WriteAllBytes(LocalManifestPath, Json.Serialize(manifest));
+            if (m_fetchedEtag != null)
+                File.WriteAllText(LocalEtagPath, m_fetchedEtag, Encoding.ASCII);
         }
 
         private string LocalManifestPath => Path.Combine(m_config.StateDir, "manifest.json");
@@ -210,14 +263,62 @@ namespace OriginsLauncher
             });
         }
 
+        // ------------------------------------------------------------------ update flow
+
+        /// <summary>
+        ///     Brings the game folder to <paramref name="manifest" /> in <paramref name="language" />: finds what is
+        ///     missing or changed, takes it from the full-client pack when there is a lot (first install), downloads
+        ///     the rest file by file, removes what the previous client had and this one has not, and saves the
+        ///     manifest as the installed one. Returns how many files were outdated.
+        /// </summary>
+        public async Task<int> UpdateGameAsync(Manifest manifest, string language, bool fullCheck,
+            IProgress<UpdateProgress> progress, CancellationToken ct)
+        {
+            var previous = LoadLocalManifest();
+            bool newClient = IsNewClient(previous, manifest);
+            if (newClient)
+                Log.Write($"new client: {previous.GameExe} -> {manifest.GameExe}; its settings files are replaced once");
+
+            var wanted = manifest.FilesFor(language);
+            var outdated = await FindOutdatedAsync(wanted, fullCheck, progress, ct, newClient).ConfigureAwait(false);
+            int updated = outdated.Count;
+            Log.Write($"check lang={language} full={fullCheck}: {outdated.Count} outdated, {outdated.Sum(f => f.GzSize)} bytes to download");
+            if (ShouldUsePack(manifest, outdated))
+            {
+                try
+                {
+                    await InstallPackAsync(manifest.Pack, outdated, progress, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (!(ex is GameRunningException) && !(ex is OperationCanceledException && ct.IsCancellationRequested))
+                {
+                    // e.g. the pack was replaced on the server mid-download: single files still work
+                    Log.Write($"pack failed, downloading single files: {ex.GetType().Name}: {ex.Message}");
+                }
+
+                outdated = await FindOutdatedAsync(wanted, false, progress, ct, newClient).ConfigureAwait(false);
+                Log.Write($"after pack: {outdated.Count} outdated, {outdated.Sum(f => f.GzSize)} bytes to download");
+            }
+
+            if (outdated.Count > 0)
+                await DownloadAsync(outdated, progress, ct).ConfigureAwait(false);
+            RemoveStaleFiles(previous, manifest);
+            Log.Write("up to date");
+            SaveLocalManifest(manifest);
+            return updated;
+        }
+
         // ------------------------------------------------------------------ file check
 
         /// <summary>
         ///     Returns the files that must be downloaded. A normal check trusts the hash cache when
         ///     size and modification time are unchanged; <paramref name="full" /> re-hashes everything.
         /// </summary>
+        /// <param name="ignoreKeep">
+        ///     also replace the "keep" files (the player's settings) when they differ: only right after the manifest
+        ///     switched to another client (<see cref="IsNewClient" />), whose settings files have another format
+        /// </param>
         public async Task<List<ManifestFile>> FindOutdatedAsync(List<ManifestFile> files, bool full,
-            IProgress<UpdateProgress> progress, CancellationToken ct)
+            IProgress<UpdateProgress> progress, CancellationToken ct, bool ignoreKeep = false)
         {
             LoadCache();
             var outdated = new List<ManifestFile>();
@@ -233,7 +334,7 @@ namespace OriginsLauncher
                     continue;
                 }
 
-                if (file.Keep)
+                if (file.Keep && !ignoreKeep)
                     continue; // player-owned file: only installed when missing
 
                 if (info.Length != file.Size)
@@ -589,10 +690,10 @@ namespace OriginsLauncher
 
             progress.Report(new UpdateProgress {Status = L.S.DownloadingPack, Fraction = -1});
             PackIndex index;
-            using (var response = await Http.GetAsync(m_config.UpdateBaseUrl + pack.Index, ct).ConfigureAwait(false))
+            using (var response = await Http.GetAsync(m_config.UpdateBaseUrl + pack.Index, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
             {
                 response.EnsureSuccessStatusCode();
-                byte[] data = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                byte[] data = await ReadBodyAsync(response, ct).ConfigureAwait(false);
                 if (!string.Equals(HashBytes(data), pack.IndexSha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException(L.S.Corrupted);
                 index = Json.Parse<PackIndex>(data);
@@ -772,7 +873,7 @@ namespace OriginsLauncher
         // ------------------------------------------------------------------ game
 
         /// <summary>
-        ///     The 5095 login screen is a Flash movie. The game registers its own Flash.ocx
+        ///     The 6609 login screen is a Flash movie. The game registers its own Flash.ocx
         ///     machine-wide, which needs admin rights; when no Flash control is registered at all,
         ///     register the bundled one for the current user only (no admin needed).
         /// </summary>
@@ -810,18 +911,133 @@ namespace OriginsLauncher
             }
         }
 
-        public Process StartGame(Manifest manifest)
+        /// <summary>The file the patched 6609 client reads the account server from ("host:port", ASCII, no newline).</summary>
+        public const string ServerFile = @"ini\origins.server";
+
+        /// <summary>Starts a process; tests replace it to check what would be started without running the game.</summary>
+        public static Func<ProcessStartInfo, Process> StartProcess = Process.Start;
+
+        /// <summary>
+        ///     Writes the account server of <paramref name="language" /> to ini\origins.server, then starts the game
+        ///     (6609: Env_DX9\Conquer.exe blacknull in Env_DX9). The login token (ini\origins.login) is written
+        ///     before this by the login dialog.
+        /// </summary>
+        public Process StartGame(Manifest manifest, string language)
         {
-            string exe = ResolveGamePath(manifest.GameExe);
-            return Process.Start(new ProcessStartInfo(exe, manifest.GameArgs ?? "")
-            {
-                WorkingDirectory = m_config.InstallDir,
-                UseShellExecute = true
-            });
+            WriteServerFile(manifest, language);
+            var info = GameStartInfo(manifest);
+            Log.Write($"start {info.FileName} {info.Arguments} in {info.WorkingDirectory}");
+            return StartProcess(info);
         }
 
-        public bool GameFilesPresent(string gameExe = "Conquer.exe") =>
+        public ProcessStartInfo GameStartInfo(Manifest manifest)
+        {
+            string exe = ResolveGamePath(string.IsNullOrEmpty(manifest.GameExe) ? Manifest.DefaultGameExe : manifest.GameExe);
+            string workingDir = string.IsNullOrEmpty(manifest.WorkingDir)
+                ? Path.GetDirectoryName(exe)
+                : ResolveGamePath(manifest.WorkingDir);
+            return new ProcessStartInfo(exe, manifest.GameArgs ?? "")
+            {
+                WorkingDirectory = workingDir,
+                UseShellExecute = true
+            };
+        }
+
+        /// <summary>
+        ///     ini\origins.server = the manifest's account server for <paramref name="language" /> (English when the
+        ///     language has none). Without addresses in the manifest the file is left as installed. Returns what was
+        ///     written, or null.
+        /// </summary>
+        public string WriteServerFile(Manifest manifest, string language)
+        {
+            var servers = manifest.AccountServers;
+            if (servers == null || servers.Count == 0)
+            {
+                Log.Write("manifest has no account servers; ini\\origins.server left as it is");
+                return null;
+            }
+
+            if (!servers.TryGetValue(language ?? "", out string address) && !servers.TryGetValue("en", out address))
+                return null;
+            address = address?.Trim();
+            if (!IsHostPort(address))
+                throw new InvalidDataException(L.S.BadManifest);
+
+            string path = ResolveGamePath(ServerFile);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            byte[] bytes = Encoding.ASCII.GetBytes(address);
+            if (!File.Exists(path) || !File.ReadAllBytes(path).SequenceEqual(bytes))
+            {
+                if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
+                File.WriteAllBytes(path, bytes);
+            }
+
+            Log.Write($"account server ({language}) = {address}");
+            return address;
+        }
+
+        private static bool IsHostPort(string address)
+        {
+            if (string.IsNullOrEmpty(address) || address.Length > 63) return false;
+            int colon = address.LastIndexOf(':');
+            return colon > 0 && ushort.TryParse(address.Substring(colon + 1), out ushort port) && port > 0 &&
+                   address.Substring(0, colon).All(c => char.IsLetterOrDigit(c) || c == '.' || c == '-') &&
+                   address.All(c => c < 128);
+        }
+
+        public bool GameFilesPresent(string gameExe = Manifest.DefaultGameExe) =>
             File.Exists(Path.Combine(m_config.InstallDir, gameExe));
+
+        // ------------------------------------------------------------------ client switch (5095 -> 6609)
+
+        /// <summary>
+        ///     The manifest starts another exe than the one the game folder was last updated to (the 5095 client's
+        ///     Conquer.exe -> the 6609 client's Env_DX9\Conquer.exe): a different client, so the player's settings
+        ///     files of the old one are replaced once and its leftover files are removed.
+        /// </summary>
+        public static bool IsNewClient(Manifest previous, Manifest manifest) =>
+            previous != null && !string.IsNullOrEmpty(previous.GameExe) &&
+            !string.Equals(previous.GameExe, manifest.GameExe, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        ///     Deletes the files the previous manifest installed that the new one no longer has (in any language).
+        ///     Only files the launcher put there: anything the player added is not in a manifest and stays.
+        ///     Returns how many were removed.
+        /// </summary>
+        public int RemoveStaleFiles(Manifest previous, Manifest manifest)
+        {
+            if (previous == null) return 0;
+            var keep = manifest.AllPaths();
+            int removed = 0;
+            foreach (string path in previous.AllPaths())
+            {
+                if (keep.Contains(path)) continue;
+                string full;
+                try { full = ResolveGamePath(path); }
+                catch (InvalidDataException) { continue; }
+
+                try
+                {
+                    if (!File.Exists(full)) continue;
+                    File.SetAttributes(full, FileAttributes.Normal);
+                    File.Delete(full);
+                    lock (m_cache) m_cache.Entries.Remove(Key(path));
+                    removed++;
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    Log.Write($"stale file not removed: {path}: {ex.Message}");
+                }
+            }
+
+            if (removed > 0)
+            {
+                lock (m_cache) SaveCache();
+                Log.Write($"{removed} file(s) of the previous client removed");
+            }
+
+            return removed;
+        }
 
         // ------------------------------------------------------------------ helpers
 

@@ -19,7 +19,11 @@ namespace OriginsLauncher
         public const string ShortcutName = "Origins Conquer.lnk";
 
         public static bool IsFirstRun(Config config) =>
-            !File.Exists(Path.Combine(config.InstallDir, "Conquer.exe")) && !Directory.Exists(config.StateDir);
+            !HasGame(config.InstallDir) && !Directory.Exists(config.StateDir);
+
+        /// <summary>A game folder: the 6609 client (Env_DX9\Conquer.exe) or an older install (Conquer.exe).</summary>
+        public static bool HasGame(string dir) =>
+            File.Exists(Path.Combine(dir, Manifest.DefaultGameExe)) || File.Exists(Path.Combine(dir, "Conquer.exe"));
 
         /// <summary>True when the launcher sits in a folder that holds other things than the game.</summary>
         public static bool NeedsOwnFolder(Config config)
@@ -40,7 +44,7 @@ namespace OriginsLauncher
         {
             chosen = Path.GetFullPath(chosen);
             if (Directory.Exists(chosen) && Directory.EnumerateFileSystemEntries(chosen).Any() &&
-                !File.Exists(Path.Combine(chosen, "Conquer.exe")) &&
+                !HasGame(chosen) &&
                 !Path.GetFileName(chosen.TrimEnd('\\')).Equals(FolderName, StringComparison.OrdinalIgnoreCase))
                 return Path.Combine(chosen, FolderName);
             return chosen;
@@ -111,7 +115,7 @@ namespace OriginsLauncher
                     key.SetValue("UninstallString", $"\"{LauncherPath}\" {Config.UninstallArg}");
                     key.SetValue("NoModify", 1, RegistryValueKind.DWord);
                     key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-                    key.SetValue("EstimatedSize", 1400 * 1024, RegistryValueKind.DWord); // KB
+                    key.SetValue("EstimatedSize", 4140 * 1024, RegistryValueKind.DWord); // KB (the 6609 client: 4.0 GiB)
                 }
             }
             catch (Exception ex)
@@ -139,7 +143,7 @@ namespace OriginsLauncher
                 return;
             }
 
-            // the full screen scaler is normally closed with the game; a leftover one would lock its files
+            // the 5095 launcher's full screen scaler (a 5095 install updated to 6609 may still have it running)
             foreach (var magpie in Process.GetProcessesByName("Magpie").Where(p => IsUnder(SafePath(p), dir)))
                 TryDelete(() => magpie.Kill());
 
@@ -155,7 +159,8 @@ namespace OriginsLauncher
                 TryDelete(() => { if (File.Exists(full)) { File.SetAttributes(full, FileAttributes.Normal); File.Delete(full); } });
             }
 
-            // written by the game or the launcher at run time
+            // written by the game or the launcher at run time (Magpie\*: 5095 installs updated to 6609)
+            TryDelete(() => { string login = Path.Combine(dir, "ini", "origins.login"); if (File.Exists(login)) File.Delete(login); });
             foreach (string sub in new[] {".originsupdate", "LOG", "debug", @"Magpie\config", @"Magpie\cache", @"Magpie\logs"})
                 TryDelete(() => { if (Directory.Exists(Path.Combine(dir, sub))) Directory.Delete(Path.Combine(dir, sub), true); });
 

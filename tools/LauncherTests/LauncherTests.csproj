@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Headless tests of the launcher's own code (same framework, same source files compiled in): install, resume,
+       repair, language switch, client switch, settings and the game start, against tools\DevUpdateServer.
+       Never shows a window and never runs the game (Updater.StartProcess is replaced). See run-6609-tests.ps1. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>OriginsLauncher</RootNamespace>
+    <AssemblyName>LauncherTests</AssemblyName>
+    <Version>2.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\OriginsLauncher\Config.cs" Link="Launcher\Config.cs" />
+    <Compile Include="..\..\src\OriginsLauncher\Log.cs" Link="Launcher\Log.cs" />
+    <Compile Include="..\..\src\OriginsLauncher\Login.cs" Link="Launcher\Login.cs" />
+    <Compile Include="..\..\src\OriginsLauncher\Manifest.cs" Link="Launcher\Manifest.cs" />
+    <Compile Include="..\..\src\OriginsLauncher\Strings.cs" Link="Launcher\Strings.cs" />
+    <Compile Include="..\..\src\OriginsLauncher\Updater.cs" Link="Launcher\Updater.cs" />
+    <Compile Include="..\..\src\OriginsLauncher\GameSession.cs" Link="Launcher\GameSession.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Runtime.Serialization" />
+  </ItemGroup>
+
+</Project>
