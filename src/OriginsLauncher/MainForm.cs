@@ -23,6 +23,8 @@ namespace OriginsLauncher
         private readonly GoldButton m_check = new GoldButton();
         private readonly GoldButton m_language = new GoldButton();
         private readonly ContextMenuStrip m_languageMenu = new ContextMenuStrip();
+        private readonly GoldButton m_screen = new GoldButton();
+        private readonly ContextMenuStrip m_screenMenu = new ContextMenuStrip();
         private readonly Settings m_settings;
         private bool m_recheckAfterBusy;
         private readonly GoldButton m_close = new GoldButton {Text = "✕"};
@@ -80,12 +82,19 @@ namespace OriginsLauncher
             }
 
             m_language.Click += (s, e) => m_languageMenu.Show(m_language, new Point(0, m_language.Height));
-            // 2.0.0: no options menu any more. Its two items were 5095-only (Magpie full screen "keep 4:3" and the
-            // exe patch "leaving the game goes back to login"); the 6609 client has native resolutions.
+            // 2.2.0: the game's screen (ScreenSetup): full screen at the monitor's size (default) or a window; the
+            // menu is built when opened, from the monitor the launcher is on now
+            m_screen.SetBounds(536, 12, 124, 28);
+            m_screen.Font = new Font("Segoe UI", 9f);
+            m_screen.Click += (s, e) =>
+            {
+                FillScreenMenu();
+                m_screenMenu.Show(m_screen, new Point(0, m_screen.Height));
+            };
             ApplyTexts();
             m_close.Font = m_minimize.Font = new Font("Segoe UI", 10f);
             m_play.Enabled = false;
-            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language});
+            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language, m_screen});
 
             m_play.Click += (s, e) => PlayGame();
             m_site.Click += (s, e) => OpenUrl(m_config.SiteUrl);
@@ -105,7 +114,39 @@ namespace OriginsLauncher
             m_language.Text = $"{L.S.Language}: {L.S.Code.ToUpperInvariant()}";
             foreach (ToolStripMenuItem item in m_languageMenu.Items)
                 item.Checked = (string) item.Tag == L.S.Code;
+            var window = ScreenSetup.WindowChoice(m_settings.Screen, ScreenSetup.Desktop(), ScreenSetup.WorkArea());
+            m_screen.Text = $"{L.S.Screen}: {(window is Size size ? ScreenSetup.Name(size) : L.S.FullShort)}";
             Invalidate();
+        }
+
+        /// <summary>Full screen at this monitor's size, then the windows that fit it; the saved choice is checked.</summary>
+        private void FillScreenMenu()
+        {
+            m_screenMenu.Items.Clear();
+            var desktop = ScreenSetup.Desktop();
+            var work = ScreenSetup.WorkArea();
+            var window = ScreenSetup.WindowChoice(m_settings.Screen, desktop, work);
+            var items = new List<ToolStripMenuItem>
+            {
+                new ToolStripMenuItem(string.Format(L.S.FullScreen, ScreenSetup.Name(desktop))) {Tag = ScreenSetup.Full, Checked = window == null}
+            };
+            foreach (var size in ScreenSetup.Windows(desktop, work))
+                items.Add(new ToolStripMenuItem(string.Format(L.S.Window, ScreenSetup.Name(size))) {Tag = ScreenSetup.Name(size), Checked = size == window});
+            foreach (var item in items)
+            {
+                item.Click += (s, e) => ChangeScreen((string) ((ToolStripMenuItem) s).Tag);
+                m_screenMenu.Items.Add(item);
+            }
+        }
+
+        /// <summary>Saves the screen choice; it goes to ini\GameSetUp.ini on the next start (ScreenSetup).</summary>
+        private void ChangeScreen(string choice)
+        {
+            m_settings.Screen = choice == ScreenSetup.Full ? null : choice;
+            try { m_settings.Save(m_config); }
+            catch (Exception ex) { Log.Write($"settings not saved: {ex.Message}"); }
+            Log.Write($"screen -> {choice}");
+            ApplyTexts();
         }
 
         /// <summary>
@@ -284,7 +325,7 @@ namespace OriginsLauncher
                     return;
 
                 // ini\origins.server = this language's login port, then Env_DX9\Conquer.exe blacknull
-                first = m_updater.StartGame(manifest, L.S.Code);
+                first = m_updater.StartGame(manifest, L.S.Code, m_settings.Screen);
             }
             catch (Exception ex)
             {
@@ -305,7 +346,7 @@ namespace OriginsLauncher
                 }
 
                 WriteFreshTokenForRestart(); // a mode change restarts the client, which logs in again
-                return m_updater.StartGame(manifest, L.S.Code);
+                return m_updater.StartGame(manifest, L.S.Code, m_settings.Screen);
             });
             try
             {

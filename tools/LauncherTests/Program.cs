@@ -12,6 +12,8 @@
 //   LauncherTests start    --dir D --base-url U   login token + ini\origins.server + what would be started, per language
 //   LauncherTests migrate  --dir D --base-url U   a 5095 install (old local manifest) updated to the 6609 manifest
 //   LauncherTests etag     --dir D --base-url U   an up-to-date folder fetches the manifest with If-None-Match (304)
+//   LauncherTests screen   --dir D       the screen choice -> ini\GameSetUp.ini [ScreenMode], the game started DPI-aware,
+//                                        and a session restarts the game only after a [GameMode] switch
 // Exit code 0 = every check passed.
 
 using System;
@@ -59,6 +61,7 @@ namespace OriginsLauncher
                     case "migrate": Migrate(config).GetAwaiter().GetResult(); break;
                     case "etag": Etag(config).GetAwaiter().GetResult(); break;
                     case "offline": Offline(config).GetAwaiter().GetResult(); break;
+                    case "screen": ScreenCheck(config); break;
                     default: throw new ArgumentException("unknown command " + args[0]);
                 }
             }
@@ -332,6 +335,84 @@ namespace OriginsLauncher
                 await Task.WhenAny(serve, Task.Delay(1000));
             }
         }
+
+        // ------------------------------------------------------------------ screen
+
+        private static void ScreenCheck(Config config)
+        {
+            // the rules, on a 1920x1080 monitor with a 40-pixel taskbar
+            var d = new System.Drawing.Size(1920, 1080);
+            var wa = new System.Drawing.Rectangle(0, 0, 1920, 1040);
+            Check(ScreenSetup.Resolve(null, d, wa) == (4, 1920, 1080), "no choice: full screen = mode 4 at the monitor's size");
+            Check(ScreenSetup.Resolve("full", d, wa) == (4, 1920, 1080), "full: mode 4 1920x1080");
+            Check(ScreenSetup.Resolve("1024x768", d, wa) == (2, 1024, 768), "1024x768: TQ's window, mode 2");
+            Check(ScreenSetup.Resolve("1600x900", d, wa) == (4, 1600, 900), "1600x900: mode 4 window");
+            Check(ScreenSetup.Resolve("1680x1050", d, wa) == (4, 1920, 1080), "1680x1050 does not fit under the taskbar: full screen");
+            Check(ScreenSetup.Resolve("2560x1440", d, wa) == (4, 1920, 1080), "a size above the monitor (another monitor): full screen");
+            Check(ScreenSetup.Resolve("big", d, wa) == (4, 1920, 1080), "an unreadable choice: full screen");
+            Check(ScreenSetup.Resolve(null, new System.Drawing.Size(800, 600), new System.Drawing.Rectangle(0, 0, 800, 560)) == (2, 1024, 768),
+                "a monitor below 1024x768: TQ's window");
+            string offered = string.Join(",", ScreenSetup.Windows(d, wa).Select(ScreenSetup.Name));
+            Check(offered == "1024x768,1280x720,1280x800,1366x768,1440x900,1600x900", $"windows offered on 1920x1080: {offered}");
+
+            // StartGame writes the choice for this machine's monitor, keeps the rest of the player's file, and starts
+            // the game with __COMPAT_LAYER=HighDpiAware only for that start
+            var desktop = ScreenSetup.Desktop();
+            var work = ScreenSetup.WorkArea();
+            Console.WriteLine($"this machine: desktop {ScreenSetup.Name(desktop)}, work area {work}");
+            string ini = Path.Combine(config.InstallDir, "ini", "GameSetUp.ini");
+            Directory.CreateDirectory(Path.GetDirectoryName(ini));
+            File.WriteAllText(ini, "[ScreenMode]\r\nScreenModeRecord=3\r\nScrWidth=1024\r\nScrHeight=768\r\nFullScrType=0\r\n[Sound]\r\nMusic=37\r\n");
+            string before = Environment.GetEnvironmentVariable(Updater.CompatLayer);
+            string seen = "unset";
+            var saved = Updater.StartProcess;
+            Updater.StartProcess = info =>
+            {
+                seen = Environment.GetEnvironmentVariable(Updater.CompatLayer);
+                return null; // the game is never run by the tests
+            };
+            try
+            {
+                var updater = new Updater(config);
+                foreach (string choice in new[] {null, "1024x768", "1280x720", "99999x99999"})
+                {
+                    seen = "unset";
+                    updater.StartGame(Manifest.Fallback(), "en", choice);
+                    var want = ScreenSetup.Resolve(choice, desktop, work);
+                    int Get(string key) => (int) GetPrivateProfileInt("ScreenMode", key, -1, ini);
+                    var got = (Get("ScreenModeRecord"), Get("ScrWidth"), Get("ScrHeight"));
+                    Check(got == want && Get("FullScrType") == 1,
+                        $"{choice ?? "(none)"}: [ScreenMode] {got.Item1} {got.Item2}x{got.Item3} FST {Get("FullScrType")} (want {want.Mode} {want.Width}x{want.Height} FST 1)");
+                    Check(seen == Updater.HighDpiAware, $"{choice ?? "(none)"}: the game starts with {Updater.CompatLayer}={seen}");
+                    Check(Environment.GetEnvironmentVariable(Updater.CompatLayer) == before, "the launcher's own environment is restored after the start");
+                }
+
+                Check(GetPrivateProfileInt("Sound", "Music", -1, ini) == 37, "the player's other settings in GameSetUp.ini stay");
+            }
+            finally
+            {
+                Updater.StartProcess = saved;
+            }
+
+            // the session starts the game again only after the client's graphics-mode switch ([GameMode]), not after a
+            // live resolution change ([ScreenMode])
+            File.WriteAllText(ini, "[GameMode]\r\nGameModeRecord=1\r\n[ScreenMode]\r\nScreenModeRecord=4\r\n");
+            int starts = 0;
+            var session = new GameSession(config, () =>
+            {
+                starts++;
+                if (starts == 1) File.WriteAllText(ini, "[GameMode]\r\nGameModeRecord=0\r\n[ScreenMode]\r\nScreenModeRecord=4\r\n");
+                else if (starts == 2) File.WriteAllText(ini, "[GameMode]\r\nGameModeRecord=0\r\n[ScreenMode]\r\nScreenModeRecord=2\r\n");
+                if (starts > 2) return null;
+                return Process.Start(new ProcessStartInfo("cmd.exe", "/c exit 0") {UseShellExecute = false, CreateNoWindow = true});
+            });
+            session.RunAsync().GetAwaiter().GetResult();
+            Check(starts == 2, $"graphics-mode switch: started again once; a resolution change: no restart ({starts} starts)");
+            File.Delete(ini);
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern uint GetPrivateProfileInt(string section, string key, int defaultValue, string file);
 
         // ------------------------------------------------------------------ 5095 -> 6609
 

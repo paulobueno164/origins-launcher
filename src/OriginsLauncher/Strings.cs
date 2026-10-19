@@ -18,6 +18,7 @@ namespace OriginsLauncher
         public string Corrupted, ConnInterrupted, ConnStalled, CannotReplace, Of, Remaining;
         public string InstallTitle, InstallHeading, InstallInfo, Browse, Install, Cancel, PickFolder, InstallFailed;
         public string LoginTitle, Account, Password, LogIn, LoginInvalid, LoginConnError;
+        public string Screen, FullScreen, FullShort, Window;
 
         public static readonly Strings En = new Strings
         {
@@ -57,7 +58,8 @@ namespace OriginsLauncher
             InstallFailed = "Could not install here: {0}",
             LoginTitle = "Log in to Origins", Account = "Account", Password = "Password", LogIn = "Log in",
             LoginInvalid = "Wrong account or password.",
-            LoginConnError = "Could not reach the login server. Check your internet and try again."
+            LoginConnError = "Could not reach the login server. Check your internet and try again.",
+            Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}"
         };
 
         public static readonly Strings Pt = new Strings
@@ -98,7 +100,8 @@ namespace OriginsLauncher
             InstallFailed = "Não foi possível instalar aqui: {0}",
             LoginTitle = "Entrar no Origins", Account = "Conta", Password = "Senha", LogIn = "Entrar",
             LoginInvalid = "Conta ou senha incorretos.",
-            LoginConnError = "Não foi possível falar com o servidor de login. Verifique sua internet e tente de novo."
+            LoginConnError = "Não foi possível falar com o servidor de login. Verifique sua internet e tente de novo.",
+            Screen = "Tela", FullScreen = "Tela cheia ({0})", FullShort = "Cheia", Window = "Janela {0}"
         };
 
         public static readonly Strings Fil = new Strings
@@ -139,7 +142,8 @@ namespace OriginsLauncher
             InstallFailed = "Hindi ma-install dito: {0}",
             LoginTitle = "Mag-login sa Origins", Account = "Account", Password = "Password", LogIn = "Mag-login",
             LoginInvalid = "Mali ang account o password.",
-            LoginConnError = "Hindi maabot ang login server. I-check ang internet mo at subukan ulit."
+            LoginConnError = "Hindi maabot ang login server. I-check ang internet mo at subukan ulit.",
+            Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}"
         };
 
         public static readonly Strings[] All = {En, Pt, Fil};
@@ -173,10 +177,13 @@ namespace OriginsLauncher
     internal sealed class Settings
     {
         /// <remarks>
-        ///     The only setting since 2.0.0. The 5095 launcher's "keepAspect" (Magpie full screen), "closeOnExit" (the
-        ///     5095 exe's ExitToLogin patch) and 1.4.0's "fillScreen" keys are ignored when read and dropped on the next save.
+        ///     The 5095 launcher's "keepAspect" (Magpie full screen), "closeOnExit" (the 5095 exe's ExitToLogin patch)
+        ///     and 1.4.0's "fillScreen" keys are ignored when read and dropped on the next save.
         /// </remarks>
         [DataMember(Name = "language")] public string Language { get; set; }
+
+        /// <summary>Since 2.2.0: the game's screen, "full" (or missing) or "WxH" (<see cref="ScreenSetup" />).</summary>
+        [DataMember(Name = "screen", EmitDefaultValue = false)] public string Screen { get; set; }
 
         public static Settings Load(Config config)
         {

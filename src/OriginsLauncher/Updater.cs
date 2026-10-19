@@ -1029,17 +1029,40 @@ namespace OriginsLauncher
         public static Func<ProcessStartInfo, Process> StartProcess = Process.Start;
 
         /// <summary>
-        ///     Writes the account server of <paramref name="language" /> to ini\origins.server, then starts the game
-        ///     (6609: Env_DX9\Conquer.exe blacknull in Env_DX9). The login token (ini\origins.login) is written
-        ///     before this by the login dialog.
+        ///     Writes the account server of <paramref name="language" /> to ini\origins.server and the screen choice
+        ///     to ini\GameSetUp.ini [ScreenMode] (<see cref="ScreenSetup" />), then starts the game (6609:
+        ///     Env_DX9\Conquer.exe blacknull in Env_DX9) DPI-aware: Conquer.exe's manifest declares no DPI awareness,
+        ///     so on a monitor at 125%+ Windows would hand it a smaller, scaled desktop (blurry, and too small for the
+        ///     full-screen size); __COMPAT_LAYER=HighDpiAware in the environment it inherits turns that off. The
+        ///     login token (ini\origins.login) is written before this by the login dialog.
         /// </summary>
-        public Process StartGame(Manifest manifest, string language)
+        public Process StartGame(Manifest manifest, string language, string screen = null)
         {
             WriteServerFile(manifest, language);
+            try
+            {
+                ScreenSetup.Write(m_config.InstallDir, screen);
+            }
+            catch (Exception ex)
+            {
+                Log.Write($"screen mode not written: {ex.Message}"); // the game keeps the mode it has
+            }
+
             var info = GameStartInfo(manifest);
             Log.Write($"start {info.FileName} {info.Arguments} in {info.WorkingDirectory}");
-            return StartProcess(info);
+            string layer = Environment.GetEnvironmentVariable(CompatLayer);
+            Environment.SetEnvironmentVariable(CompatLayer, HighDpiAware); // ShellExecute: the child gets our environment
+            try
+            {
+                return StartProcess(info);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(CompatLayer, layer); // not for the browser and the rest
+            }
         }
+
+        public const string CompatLayer = "__COMPAT_LAYER", HighDpiAware = "HighDpiAware";
 
         public ProcessStartInfo GameStartInfo(Manifest manifest)
         {
