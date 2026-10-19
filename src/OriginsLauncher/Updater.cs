@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -8,6 +9,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -39,6 +41,14 @@ namespace OriginsLauncher
         // Full-client pack: parts are tens of MB, so a few parallel connections fill the line.
         private const int PackParallel = 6;
         private const int PackAttempts = 5;
+
+        // Unpacking the pack: one thread reads the parts in order and hands each file's gzip to
+        // these threads, which inflate, hash and write it. ~110k small files one after the other
+        // took ~7 min on an SSD (every create/close costs far more than its bytes, antivirus
+        // included); several writers at once do it in a fraction of that.
+        private const int UnpackWorkers = 8;
+        private const int UnpackQueue = 64;
+        private const int UnpackInMemoryGz = 2 << 20; // bigger files go straight from the parts
 
         /// <summary>Below this much to download, single files are faster than the pack.</summary>
         private const long PackThreshold = 64L << 20;
@@ -651,7 +661,7 @@ namespace OriginsLauncher
         /// <summary>Writes the decompressed <paramref name="gz" /> (null: an empty file) and returns its SHA-256.</summary>
         private static string Inflate(Stream gz, string outPath)
         {
-            using (var sha = SHA256.Create())
+            using (var sha = new SHA256Cng())
             using (var input = gz == null ? Stream.Null : new GZipStream(gz, CompressionMode.Decompress))
             using (var output = new FileStream(outPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920))
             {
@@ -736,63 +746,144 @@ namespace OriginsLauncher
                 string.Equals(want.Sha256, entry.Sha256, StringComparison.OrdinalIgnoreCase);
 
             var toInstall = index.Files.Where(Matches).ToList();
-            long totalBytes = Math.Max(1, toInstall.Sum(f => f.Size)), doneBytes = 0;
-            int installed = 0;
-            var clock = Stopwatch.StartNew();
-
-            await Task.Run(() =>
-            {
-                using (var blob = new PartsReader(parts))
-                {
-                    foreach (var entry in index.Files)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        if (!Matches(entry))
-                        {
-                            blob.Skip(entry.GzSize);
-                            continue;
-                        }
-
-                        string target = ResolveGamePath(entry.Path);
-                        string temp = target + ".originstmp";
-                        Directory.CreateDirectory(Path.GetDirectoryName(target));
-                        var slice = new LimitedStream(blob, entry.GzSize);
-                        string sha = Inflate(entry.Size == 0 ? null : slice, temp);
-                        slice.SkipRest();
-                        if (!string.Equals(sha, entry.Sha256, StringComparison.OrdinalIgnoreCase))
-                        {
-                            // cannot happen with verified parts; leave the file to the per-file download
-                            Log.Write($"pack: {entry.Path} hash mismatch, skipped");
-                            DeleteIfExists(temp);
-                            continue;
-                        }
-
-                        ReplaceFile(temp, target, entry.Path);
-                        var info = new FileInfo(target);
-                        lock (m_cache)
-                            m_cache.Entries[Key(entry.Path)] = new CacheEntry
-                                {Size = info.Length, LastWriteTicks = info.LastWriteTimeUtc.Ticks, Sha256 = sha};
-
-                        installed++;
-                        doneBytes += entry.Size;
-                        if (clock.ElapsedMilliseconds >= 100 || installed == toInstall.Count)
-                        {
-                            clock.Restart();
-                            progress.Report(new UpdateProgress
-                            {
-                                Status = string.Format(L.S.Unpacking, installed, toInstall.Count),
-                                Detail = entry.Path,
-                                Fraction = (double) doneBytes / totalBytes
-                            });
-                        }
-                    }
-                }
-            }, ct).ConfigureAwait(false);
+            int installed = await Task.Run(() => Unpack(parts, index, Matches, toInstall, progress, ct), ct).ConfigureAwait(false);
 
             lock (m_cache) SaveCache();
             foreach (var part in parts) DeleteIfExists(part);
             RemoveEmptyFolders(dir);
             Log.Write($"pack {pack.Id}: {installed} files installed");
+            return installed;
+        }
+
+        /// <summary>Installs the <paramref name="matches" /> files of the downloaded pack parts.</summary>
+        private int Unpack(List<string> parts, PackIndex index, Func<ManifestFile, bool> matches, List<ManifestFile> toInstall,
+            IProgress<UpdateProgress> progress, CancellationToken ct)
+        {
+            long totalBytes = Math.Max(1, toInstall.Sum(f => f.Size)), doneBytes = 0;
+            int installed = 0;
+            var clock = Stopwatch.StartNew();
+            var folders = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            Exception failure = null;
+
+            void Install(ManifestFile entry, Stream gz)
+            {
+                string target = ResolveGamePath(entry.Path);
+                string folder = Path.GetDirectoryName(target);
+                folders.GetOrAdd(folder, f => Directory.CreateDirectory(f) != null); // present only once created
+
+                // A new file is written in place: if the launcher stops halfway, the next check finds
+                // the wrong hash and downloads it again. An existing one is replaced only when the new
+                // copy is complete and verified.
+                bool exists = File.Exists(target);
+                string temp = exists ? target + ".originstmp" : target;
+                string sha = Inflate(gz, temp);
+                if (!string.Equals(sha, entry.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    // cannot happen with verified parts; leave the file to the per-file download
+                    Log.Write($"pack: {entry.Path} hash mismatch, skipped");
+                    DeleteIfExists(temp);
+                    return;
+                }
+
+                if (exists) ReplaceFile(temp, target, entry.Path);
+                var info = new FileInfo(target);
+                lock (m_cache)
+                    m_cache.Entries[Key(entry.Path)] = new CacheEntry
+                        {Size = info.Length, LastWriteTicks = info.LastWriteTimeUtc.Ticks, Sha256 = sha};
+
+                int count = Interlocked.Increment(ref installed);
+                long done = Interlocked.Add(ref doneBytes, entry.Size);
+                lock (clock)
+                {
+                    if (clock.ElapsedMilliseconds < 100 && count != toInstall.Count) return;
+                    clock.Restart();
+                }
+
+                progress.Report(new UpdateProgress
+                {
+                    Status = string.Format(L.S.Unpacking, count, toInstall.Count),
+                    Detail = entry.Path,
+                    Fraction = (double) done / totalBytes
+                });
+            }
+
+            using (var stop = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            using (var queue = new BlockingCollection<KeyValuePair<ManifestFile, byte[]>>(UnpackQueue))
+            {
+                void Fail(Exception ex)
+                {
+                    Interlocked.CompareExchange(ref failure, ex, null);
+                    stop.Cancel();
+                }
+
+                var workers = Enumerable.Range(0, UnpackWorkers).Select(_ => Task.Run(() =>
+                {
+                    try
+                    {
+                        foreach (var job in queue.GetConsumingEnumerable(stop.Token))
+                            Install(job.Key, job.Value == null ? null : new MemoryStream(job.Value, false));
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        Fail(ex);
+                    }
+                })).ToArray();
+
+                try
+                {
+                    using (var blob = new PartsReader(parts))
+                    {
+                        foreach (var entry in index.Files)
+                        {
+                            stop.Token.ThrowIfCancellationRequested();
+                            if (!matches(entry))
+                            {
+                                blob.Skip(entry.GzSize);
+                                continue;
+                            }
+
+                            if (entry.Size == 0)
+                            {
+                                blob.Skip(entry.GzSize);
+                                queue.Add(new KeyValuePair<ManifestFile, byte[]>(entry, null), stop.Token);
+                            }
+                            else if (entry.GzSize > UnpackInMemoryGz)
+                            {
+                                var slice = new LimitedStream(blob, entry.GzSize);
+                                Install(entry, slice); // a big file: inflated here while the writers go on
+                                slice.SkipRest();
+                            }
+                            else
+                            {
+                                var gz = new byte[entry.GzSize];
+                                for (int read = 0, n; read < gz.Length; read += n)
+                                    if ((n = blob.Read(gz, read, gz.Length - read)) == 0)
+                                        throw new EndOfStreamException();
+                                queue.Add(new KeyValuePair<ManifestFile, byte[]>(entry, gz), stop.Token);
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // a writer failed (rethrown below) or the player cancelled
+                }
+                catch (Exception ex)
+                {
+                    Fail(ex);
+                }
+                finally
+                {
+                    queue.CompleteAdding();
+                    Task.WaitAll(workers);
+                }
+            }
+
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
+            ct.ThrowIfCancellationRequested();
             return installed;
         }
 
@@ -873,28 +964,22 @@ namespace OriginsLauncher
         // ------------------------------------------------------------------ game
 
         /// <summary>
-        ///     The 6609 login screen is a Flash movie. The game registers its own Flash.ocx
-        ///     machine-wide, which needs admin rights; when no Flash control is registered at all,
-        ///     register the bundled one for the current user only (no admin needed).
+        ///     The 6609 client needs the Flash control (Flash UI, and at start it refuses to run with "Install
+        ///     Flash 6.0 or later" when it cannot create one). It tries to register its own Flash.ocx
+        ///     machine-wide, which needs admin rights, and Windows no longer ships Flash, so the launcher
+        ///     registers the bundled Flash.ocx for the current user only (no admin needed).
+        ///     The class alone is not enough: the client asks the control for FlashVersion through
+        ///     IDispatch, which loads the type library from the registry; without it the version comes back
+        ///     0 and the client shows the same message (clean Windows 11, 2026-10-19). Per-user keys win over
+        ///     machine-wide ones, so this also keeps the game off an end-of-life system Flash.
         /// </summary>
         public void EnsureFlashRegistered()
         {
-            const string clsid = "{D27CDB6E-AE6D-11cf-96B8-444553540000}";
             string ocx = Path.Combine(m_config.InstallDir, "Flash.ocx");
-            if (!File.Exists(ocx))
+            if (!File.Exists(ocx) || FlashRegisteredTo(ocx))
                 return;
 
-            foreach (var view in new[] {RegistryView.Registry32, RegistryView.Registry64})
-            {
-                using (var root = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view))
-                using (var server = root.OpenSubKey($@"CLSID\{clsid}\InprocServer32"))
-                {
-                    if (server?.GetValue(null) is string path && File.Exists(path))
-                        return; // a working Flash control is already registered
-                }
-            }
-
-            foreach (var keyPath in new[] {$@"Software\Classes\CLSID\{clsid}", $@"Software\Classes\Wow6432Node\CLSID\{clsid}"})
+            foreach (var keyPath in new[] {$@"Software\Classes\CLSID\{FlashClsid}", $@"Software\Classes\Wow6432Node\CLSID\{FlashClsid}"})
             {
                 using (var key = Registry.CurrentUser.CreateSubKey(keyPath))
                 {
@@ -909,7 +994,33 @@ namespace OriginsLauncher
                         progId.SetValue(null, "ShockwaveFlash.ShockwaveFlash.7");
                 }
             }
+
+            // TypeLib\{FlashLibId}\1.0\0\win32 and the Interface keys of IShockwaveFlash and its events
+            int hr = LoadTypeLibEx(ocx, 2 /* REGKIND_NONE */, out var typeLib);
+            if (hr == 0)
+                hr = RegisterTypeLibForUser(typeLib, ocx, Path.GetDirectoryName(ocx));
+            if (hr != 0)
+                Log.Write($"Flash type library not registered: 0x{hr:X8}");
         }
+
+        public const string FlashClsid = "{D27CDB6E-AE6D-11cf-96B8-444553540000}";
+        public const string FlashLibId = "{D27CDB6B-AE6D-11CF-96B8-444553540000}";
+
+        /// <summary>True when the 32-bit view (the client is 32-bit) has the class and its type library on <paramref name="ocx" />.</summary>
+        private static bool FlashRegisteredTo(string ocx)
+        {
+            using (var root = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Registry32))
+            using (var server = root.OpenSubKey($@"CLSID\{FlashClsid}\InprocServer32"))
+            using (var lib = root.OpenSubKey($@"TypeLib\{FlashLibId}\1.0\0\win32"))
+                return server?.GetValue(null) is string path && path.Equals(ocx, StringComparison.OrdinalIgnoreCase) &&
+                       lib?.GetValue(null) is string libPath && libPath.Equals(ocx, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [DllImport("oleaut32.dll", CharSet = CharSet.Unicode)]
+        private static extern int LoadTypeLibEx(string file, int regKind, out System.Runtime.InteropServices.ComTypes.ITypeLib typeLib);
+
+        [DllImport("oleaut32.dll", CharSet = CharSet.Unicode)]
+        private static extern int RegisterTypeLibForUser(System.Runtime.InteropServices.ComTypes.ITypeLib typeLib, string fullPath, string helpDir);
 
         /// <summary>The file the patched 6609 client reads the account server from ("host:port", ASCII, no newline).</summary>
         public const string ServerFile = @"ini\origins.server";
@@ -1106,14 +1217,14 @@ namespace OriginsLauncher
 
         public static string HashFile(string path)
         {
-            using (var sha = SHA256.Create())
+            using (var sha = new SHA256Cng())
             using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 20))
                 return ToHex(sha.ComputeHash(stream));
         }
 
         private static string HashBytes(byte[] data)
         {
-            using (var sha = SHA256.Create())
+            using (var sha = new SHA256Cng())
                 return ToHex(sha.ComputeHash(data));
         }
 

@@ -94,7 +94,6 @@ namespace OriginsLauncher
         // ------------------------------------------------------------------ uninstall
 
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\OriginsConquer";
-        private const string FlashClsid = "{D27CDB6E-AE6D-11cf-96B8-444553540000}";
 
         /// <summary>
         ///     Lists the game in Windows' installed apps (current user only, no admin) with an
@@ -183,7 +182,7 @@ namespace OriginsLauncher
             }
 
             string ocx = Path.Combine(dir, "Flash.ocx");
-            foreach (var keyPath in new[] {$@"Software\Classes\CLSID\{FlashClsid}", $@"Software\Classes\Wow6432Node\CLSID\{FlashClsid}"})
+            foreach (var keyPath in new[] {$@"Software\Classes\CLSID\{Updater.FlashClsid}", $@"Software\Classes\Wow6432Node\CLSID\{Updater.FlashClsid}"})
             {
                 TryDelete(() =>
                 {
@@ -193,6 +192,19 @@ namespace OriginsLauncher
                     Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
                 });
             }
+
+            // the type library and the interfaces it registered (Updater.EnsureFlashRegistered)
+            TryDelete(() =>
+            {
+                string libKey = $@"Software\Classes\TypeLib\{Updater.FlashLibId}";
+                using (var lib = Registry.CurrentUser.OpenSubKey(libKey + @"\1.0\0\win32"))
+                    if (!(lib?.GetValue(null) is string path) || !path.Equals(ocx, StringComparison.OrdinalIgnoreCase))
+                        return; // not ours
+                Registry.CurrentUser.DeleteSubKeyTree(libKey, false);
+                foreach (string iid in new[] {"{D27CDB6C-AE6D-11CF-96B8-444553540000}", "{D27CDB6D-AE6D-11CF-96B8-444553540000}"})
+                foreach (string view in new[] {@"Software\Classes\Interface\", @"Software\Classes\Wow6432Node\Interface\"})
+                    Registry.CurrentUser.DeleteSubKeyTree(view + iid, false);
+            });
 
             TryDelete(() => Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false));
 
