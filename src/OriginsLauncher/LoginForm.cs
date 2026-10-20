@@ -17,7 +17,7 @@ namespace OriginsLauncher
         private readonly Label m_error;
         private readonly Button m_login;
 
-        public string Token { get; private set; }
+        public IssuedToken Token { get; private set; }
         public string AccountName { get; private set; }
         public string Secret { get; private set; }
 
@@ -90,7 +90,8 @@ namespace OriginsLauncher
             SetBusy(true);
             try
             {
-                Token = await LoginClient.RequestTokenAsync(m_config, account, password);
+                // relogin: the launcher keeps this session's tokens ready for the game's login screen (ReloginKeeper)
+                Token = await LoginClient.IssueAsync(m_config, account, password, true);
                 AccountName = account;
                 Secret = password;
                 DialogResult = DialogResult.OK;

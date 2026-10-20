@@ -39,8 +39,9 @@ namespace OriginsLauncher
         private readonly CancellationTokenSource m_cts = new CancellationTokenSource();
         private bool m_busy;
         private Bitmap m_backdrop; // background image + gradients, rendered once per size
-        private string m_loginAccount; // kept for this play session so screen-mode restarts can fetch a fresh token
+        private string m_loginAccount; // kept for this play session: new tokens for restarts and the game's login screen
         private string m_loginSecret;  // the player's own password, held only for the session; cleared after playing
+        private ReloginKeeper m_keeper; // the session's login tokens (2.3.0: also after a disconnect, see ReloginKeeper)
 
         public MainForm(Config config)
         {
@@ -334,9 +335,12 @@ namespace OriginsLauncher
             }
 
             // The launcher stays in the background while the game runs: the restart after the game's
-            // graphics-mode change is handled by the session.
+            // graphics-mode change is handled by the session, and the keeper puts a login token where the client
+            // reads it whenever the game is back at its login screen (a disconnect), until the game closes.
             Hide();
-            var session = new GameSession(m_config, () =>
+            var keeper = m_keeper;
+            bool watched = first != null; // without a process to watch, the token stays for the game as in 2.2.0
+            var session = new GameSession(m_config, async () =>
             {
                 if (first != null)
                 {
@@ -345,9 +349,11 @@ namespace OriginsLauncher
                     return started;
                 }
 
-                WriteFreshTokenForRestart(); // a mode change restarts the client, which logs in again
+                // a mode change restarts the client, which logs in again
+                if (!await keeper.RenewAsync(CancellationToken.None))
+                    Log.Write("no login token for the restart; the game's login fails until it is started from the launcher");
                 return m_updater.StartGame(manifest, L.S.Code, m_settings.Screen);
-            });
+            }, keeper.WatchAsync);
             try
             {
                 await session.RunAsync();
@@ -357,6 +363,7 @@ namespace OriginsLauncher
                 Log.Write($"game session failed: {ex.GetType().Name}: {ex.Message}");
             }
 
+            if (watched) keeper.Forget(); // the game closed: no token of this session waits in the file
             m_loginSecret = null; // done playing: drop the password held for this session
             Close();
         }
@@ -373,29 +380,12 @@ namespace OriginsLauncher
 
             m_loginAccount = dialog.AccountName;
             m_loginSecret = dialog.Secret;
-            LoginClient.WriteTokenFile(m_config, dialog.Token);
+            // New tokens (a graphics-mode restart, the game's login screen after a disconnect) come from the account
+            // and password held for this session. Until 2.2.0 the restart's token was fetched with a blocking call on
+            // this window's thread, whose own continuation needed that thread: the restart never came.
+            m_keeper = new ReloginKeeper(m_config, ct => LoginClient.IssueAsync(m_config, m_loginAccount, m_loginSecret, true, ct));
+            m_keeper.Start(dialog.Token);
             return true;
-        }
-
-        /// <summary>
-        ///     A screen-mode change closes and restarts the client, which shows its login screen again, so it
-        ///     needs a fresh single-use token. Fetches one with the account kept from <see cref="EnsureLogin" />;
-        ///     on a failure the client just can't log in and the player can start again from the launcher.
-        /// </summary>
-        private void WriteFreshTokenForRestart()
-        {
-            if (m_loginAccount == null || m_loginSecret == null)
-                return;
-            try
-            {
-                string token = LoginClient.RequestTokenAsync(m_config, m_loginAccount, m_loginSecret)
-                    .GetAwaiter().GetResult();
-                LoginClient.WriteTokenFile(m_config, token);
-            }
-            catch (Exception ex)
-            {
-                Log.Write($"could not refresh the login token for the restart: {ex.Message}");
-            }
         }
 
         private void SetStatus(string status, string detail, double fraction, Color? color = null)

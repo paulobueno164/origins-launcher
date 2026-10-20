@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Headless tests of the launcher's own code (same framework, same source files compiled in): install, resume,
-       repair, language switch, client switch, settings, the game start and its screen mode, against tools\DevUpdateServer.
+       repair, language switch, client switch, settings, the game start and its screen mode, the login tokens (relogin), against tools\DevUpdateServer.
        Never shows a window and never runs the game (Updater.StartProcess is replaced). See run-6609-tests.ps1. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -22,6 +22,7 @@
     <Compile Include="..\..\src\OriginsLauncher\Updater.cs" Link="Launcher\Updater.cs" />
     <Compile Include="..\..\src\OriginsLauncher\GameSession.cs" Link="Launcher\GameSession.cs" />
     <Compile Include="..\..\src\OriginsLauncher\ScreenSetup.cs" Link="Launcher\ScreenSetup.cs" />
+    <Compile Include="..\..\src\OriginsLauncher\ReloginKeeper.cs" Link="Launcher\ReloginKeeper.cs" />
   </ItemGroup>
 
   <ItemGroup>

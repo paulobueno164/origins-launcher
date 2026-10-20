@@ -17,7 +17,7 @@ namespace OriginsLauncher
         public string UninstallTitle, UninstallConfirm, UninstallGameOpen, UninstallDone;
         public string Corrupted, ConnInterrupted, ConnStalled, CannotReplace, Of, Remaining;
         public string InstallTitle, InstallHeading, InstallInfo, Browse, Install, Cancel, PickFolder, InstallFailed;
-        public string LoginTitle, Account, Password, LogIn, LoginInvalid, LoginConnError;
+        public string LoginTitle, Account, Password, LogIn, LoginInvalid, LoginConnError, LoginBusy;
         public string Screen, FullScreen, FullShort, Window;
 
         public static readonly Strings En = new Strings
@@ -35,7 +35,7 @@ namespace OriginsLauncher
             GameOpen = "The game is running.", UpdateError = "Error updating the game.",
             ServerSlow = "The server took too long to answer.", TryAgain = "Click \"Verify files\" to try again.",
             CannotStart = "Could not start the game.",
-            Subtitle = "CLASSIC CONQUER  ·  PATCH 6609", News = "NEWS",
+            Subtitle = "CLASSIC CONQUER  ·  PATCH 5095", News = "NEWS",
             Welcome = "Welcome to Origins Conquer! Server news shows up here.",
             ClientVersion = "Client v{0}", DateFormat = "MM/dd/yyyy",
             VerifyingFiles = "Verifying files...", VerifyingDetail = "{0} of {1}: {2}",
@@ -59,6 +59,7 @@ namespace OriginsLauncher
             LoginTitle = "Log in to Origins", Account = "Account", Password = "Password", LogIn = "Log in",
             LoginInvalid = "Wrong account or password.",
             LoginConnError = "Could not reach the login server. Check your internet and try again.",
+            LoginBusy = "Too many logins from this connection. Wait a few minutes and try again.",
             Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}"
         };
 
@@ -77,7 +78,7 @@ namespace OriginsLauncher
             GameOpen = "O jogo está aberto.", UpdateError = "Erro ao atualizar o jogo.",
             ServerSlow = "O servidor demorou para responder.", TryAgain = "Clique em \"Verificar arquivos\" para tentar de novo.",
             CannotStart = "Não foi possível abrir o jogo.",
-            Subtitle = "CONQUER CLÁSSICO  ·  VERSÃO 6609", News = "NOTÍCIAS",
+            Subtitle = "CONQUER CLÁSSICO  ·  VERSÃO 5095", News = "NOTÍCIAS",
             Welcome = "Bem-vindo ao Origins Conquer! Novidades do servidor aparecem aqui.",
             ClientVersion = "Cliente v{0}", DateFormat = "dd/MM/yyyy",
             VerifyingFiles = "Verificando arquivos...", VerifyingDetail = "{0} de {1}: {2}",
@@ -101,6 +102,7 @@ namespace OriginsLauncher
             LoginTitle = "Entrar no Origins", Account = "Conta", Password = "Senha", LogIn = "Entrar",
             LoginInvalid = "Conta ou senha incorretos.",
             LoginConnError = "Não foi possível falar com o servidor de login. Verifique sua internet e tente de novo.",
+            LoginBusy = "Muitos logins desta conexão. Aguarde alguns minutos e tente de novo.",
             Screen = "Tela", FullScreen = "Tela cheia ({0})", FullShort = "Cheia", Window = "Janela {0}"
         };
 
@@ -119,7 +121,7 @@ namespace OriginsLauncher
             GameOpen = "Bukas pa ang laro.", UpdateError = "May error sa pag-update ng laro.",
             ServerSlow = "Masyadong matagal sumagot ang server.", TryAgain = "I-click ang \"I-check ang files\" para subukan ulit.",
             CannotStart = "Hindi mabuksan ang laro.",
-            Subtitle = "CLASSIC CONQUER  ·  PATCH 6609", News = "BALITA",
+            Subtitle = "CLASSIC CONQUER  ·  PATCH 5095", News = "BALITA",
             Welcome = "Maligayang pagdating sa Origins Conquer! Dito lalabas ang mga balita ng server.",
             ClientVersion = "Client v{0}", DateFormat = "MM/dd/yyyy",
             VerifyingFiles = "Vine-verify ang files...", VerifyingDetail = "{0} sa {1}: {2}",
@@ -143,6 +145,7 @@ namespace OriginsLauncher
             LoginTitle = "Mag-login sa Origins", Account = "Account", Password = "Password", LogIn = "Mag-login",
             LoginInvalid = "Mali ang account o password.",
             LoginConnError = "Hindi maabot ang login server. I-check ang internet mo at subukan ulit.",
+            LoginBusy = "Masyadong maraming login mula sa koneksyong ito. Maghintay ng ilang minuto at subukan ulit.",
             Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}"
         };
 

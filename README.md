@@ -24,6 +24,12 @@ this repository: the launcher downloads it from originsco.online.
 - **Login:** the launcher asks for the account and password, gets a single-use token from the site
   (`POST /api/account/launcher-token`) and writes it to `ini\origins.login`, which the patched client sends
   instead of the password.
+- **Logging in again (2.3.0):** after a disconnect the client goes back to its own login screen. The launcher stays
+  with the game until it closes and keeps a fresh token in `ini\origins.login` whenever the game is at that screen
+  (no server connection for 2 seconds, seen in the game process's own TCP table): a new one after the last was
+  read, and an unread one renewed before it ends, a few times per wait. With several game windows from the same
+  folder only the window in front has its token in the file. Tokens are asked with `"Relogin": true`; a site that
+  answers `expiresIn` gives them a longer life (an older site: 90 seconds).
 - **Start:** writes the chosen language's account server (`host:port` from the manifest's `accountServers`) to
   `ini\origins.server`, then runs `Env_DX9\Conquer.exe blacknull` in `Env_DX9` (manifest `gameExe`, `gameArgs`,
   `workingDir`). After the game's graphics-mode change prompt (the client closes and would run TQ's `play.exe`,
@@ -50,8 +56,10 @@ goes back to login" (a 5095 exe patch) are gone; the 6609 client has native reso
 
 The launcher only talks to `originsco.online`: the update manifest and game files, the news (the
 request carries the chosen language), the background image and the login. The account and password typed in the
-launcher go over HTTPS to the site only to get a single-use login token; they are never written to disk and are
-forgotten when the game closes. It collects and sends no other personal data, files or telemetry; requests carry
+launcher go over HTTPS to the site only to get single-use login tokens (for the game's first login and its logins
+after a disconnect); they are never written to disk and are forgotten when the game closes. To know when the game
+is at its login screen the launcher looks at which connections the game process has open and which window is in
+front; it reads no traffic. It collects and sends no other personal data, files or telemetry; requests carry
 only the launcher version in the User-Agent.
 
 ## Building
@@ -102,11 +110,14 @@ against DevUpdateServer, installs the client from scratch (closed at 30% of the 
 downloads), compares every file's SHA-256 with the client folder and the language pack, switches languages,
 repairs deleted/truncated/corrupted files, updates a 5095 install, checks the conditional manifest, offline play,
 a 1.5.0 `settings.json`, and what would be started (`Updater.StartProcess` replaced) with `ini\origins.server`
-and `ini\origins.login` per language.
+and `ini\origins.login` per language. `LauncherTests relogin --dir D` (no update server needed) checks 2.3.0's
+login tokens: the site's answers, the file written and read the way the client opens it, the TCP probe, and the
+keeper against a stand-in game and site (disconnect and login again, a login going on, idle renewals, two game
+windows, site failures).
 
 ---
 
 **Português:** launcher e atualizador do Origins Conquer (cliente 6609), código aberto (MIT). Baixa o jogo em
-pacotes grandes com retomada, confere cada arquivo por SHA-256, atualiza só o que mudou, faz o login por token e
-se atualiza sozinho. Fala apenas com originsco.online e não envia dados pessoais além do login. Política de
+pacotes grandes com retomada, confere cada arquivo por SHA-256, atualiza só o que mudou, faz o login por token
+(também depois de uma queda de conexão, pela tela de login do jogo) e se atualiza sozinho. Fala apenas com originsco.online e não envia dados pessoais além do login. Política de
 assinatura: <https://originsco.online/assinatura.html>.

@@ -105,6 +105,8 @@ try {
     T 'update server down: play offline' offline --dir $Dir --base-url $base
     StopServer
     T '1.5.0 settings.json' settings --dir $Dir
+    T 'screen choice and graphics-mode restart' screen --dir $Dir
+    T '2.3.0: 5095 header, login tokens for the game''s own login screen' relogin --dir $Dir
 }
 finally {
     StopServer

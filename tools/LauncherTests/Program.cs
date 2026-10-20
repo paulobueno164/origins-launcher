@@ -14,6 +14,8 @@
 //   LauncherTests etag     --dir D --base-url U   an up-to-date folder fetches the manifest with If-None-Match (304)
 //   LauncherTests screen   --dir D       the screen choice -> ini\GameSetUp.ini [ScreenMode], the game started DPI-aware,
 //                                        and a session restarts the game only after a [GameMode] switch
+//   LauncherTests relogin  --dir D       2.3.0: the 5095 header, the site's token answers, ini\origins.login as the client
+//                                        opens it, the TCP probe, and the keeper's login tokens (ReloginTests.cs)
 // Exit code 0 = every check passed.
 
 using System;
@@ -30,7 +32,7 @@ using System.Threading.Tasks;
 
 namespace OriginsLauncher
 {
-    internal static class TestProgram
+    internal static partial class TestProgram
     {
         private static int s_failures;
 
@@ -62,6 +64,7 @@ namespace OriginsLauncher
                     case "etag": Etag(config).GetAwaiter().GetResult(); break;
                     case "offline": Offline(config).GetAwaiter().GetResult(); break;
                     case "screen": ScreenCheck(config); break;
+                    case "relogin": Relogin(config).GetAwaiter().GetResult(); break;
                     default: throw new ArgumentException("unknown command " + args[0]);
                 }
             }
