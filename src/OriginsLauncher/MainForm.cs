@@ -25,6 +25,8 @@ namespace OriginsLauncher
         private readonly ContextMenuStrip m_languageMenu = new ContextMenuStrip();
         private readonly GoldButton m_screen = new GoldButton();
         private readonly ContextMenuStrip m_screenMenu = new ContextMenuStrip();
+        private readonly GoldButton m_route = new GoldButton();
+        private readonly ContextMenuStrip m_routeMenu = new ContextMenuStrip();
         private readonly Settings m_settings;
         private bool m_recheckAfterBusy;
         private readonly GoldButton m_close = new GoldButton {Text = "✕"};
@@ -92,10 +94,18 @@ namespace OriginsLauncher
                 FillScreenMenu();
                 m_screenMenu.Show(m_screen, new Point(0, m_screen.Height));
             };
+            // 2.4.0: the way to the servers (GameRoute): the UDP tunnel (default) or direct
+            m_route.SetBounds(404, 12, 124, 28);
+            m_route.Font = new Font("Segoe UI", 9f);
+            m_route.Click += (s, e) =>
+            {
+                FillRouteMenu();
+                m_routeMenu.Show(m_route, new Point(0, m_route.Height));
+            };
             ApplyTexts();
             m_close.Font = m_minimize.Font = new Font("Segoe UI", 10f);
             m_play.Enabled = false;
-            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language, m_screen});
+            Controls.AddRange(new Control[] {m_play, m_site, m_check, m_progress, m_close, m_minimize, m_language, m_screen, m_route});
 
             m_play.Click += (s, e) => PlayGame();
             m_site.Click += (s, e) => OpenUrl(m_config.SiteUrl);
@@ -117,7 +127,30 @@ namespace OriginsLauncher
                 item.Checked = (string) item.Tag == L.S.Code;
             var window = ScreenSetup.WindowChoice(m_settings.Screen, ScreenSetup.Desktop(), ScreenSetup.WorkArea());
             m_screen.Text = $"{L.S.Screen}: {(window is Size size ? ScreenSetup.Name(size) : L.S.FullShort)}";
+            m_route.Text = $"{L.S.Route}: {(m_settings.Route == GameRoute.Direct ? L.S.RouteDirect : L.S.RouteTunnel)}";
             Invalidate();
+        }
+
+        private void FillRouteMenu()
+        {
+            m_routeMenu.Items.Clear();
+            bool direct = m_settings.Route == GameRoute.Direct;
+            var tunnel = new ToolStripMenuItem(L.S.RouteTunnelItem) {Checked = !direct};
+            tunnel.Click += (s, e) => ChangeRoute(null);
+            var straight = new ToolStripMenuItem(L.S.RouteDirectItem) {Checked = direct};
+            straight.Click += (s, e) => ChangeRoute(GameRoute.Direct);
+            m_routeMenu.Items.Add(tunnel);
+            m_routeMenu.Items.Add(straight);
+        }
+
+        /// <summary>Saves the route; it is used from the next "Play" on (GameRoute).</summary>
+        private void ChangeRoute(string choice)
+        {
+            m_settings.Route = choice;
+            try { m_settings.Save(m_config); }
+            catch (Exception ex) { Log.Write($"settings not saved: {ex.Message}"); }
+            Log.Write($"route -> {choice ?? "tunnel"}");
+            ApplyTexts();
         }
 
         /// <summary>Full screen at this monitor's size, then the windows that fit it; the saved choice is checked.</summary>
@@ -309,6 +342,8 @@ namespace OriginsLauncher
             if (m_manifest == null && !m_updater.GameFilesPresent()) return;
             var manifest = m_manifest ?? Manifest.Fallback();
             Process first;
+            Task<GameRoute> opening = null;
+            GameRoute route = null;
             try
             {
                 try
@@ -320,16 +355,34 @@ namespace OriginsLauncher
                     // the game registers Flash itself when it can; never block playing for this
                 }
 
+                // 2.4.0: the UDP tunnel opens while the player logs in (GameRoute; direct when it can't)
+                opening = GameRoute.OpenAsync(m_updater, manifest, L.S.Code, m_settings.Route, m_cts.Token);
+
                 // Log in first: the player gives their account and password, the launcher gets a single-use
                 // token from the site and writes it where the client reads it (ini\origins.login).
                 if (!EnsureLogin())
+                {
+                    DisposeWhenOpen(opening);
                     return;
+                }
 
-                // ini\origins.server = this language's login port, then Env_DX9\Conquer.exe blacknull
-                first = m_updater.StartGame(manifest, L.S.Code, m_settings.Screen);
+                if (!opening.IsCompleted)
+                {
+                    m_play.Enabled = false;
+                    SetStatus(L.S.OpeningTunnel, "", -1);
+                }
+
+                route = await opening;
+
+                // ini\origins.server = the tunnel's local login port or this language's login port, then
+                // Env_DX9\Conquer.exe blacknull
+                first = m_updater.StartGame(manifest, L.S.Code, m_settings.Screen, route.Address);
             }
             catch (Exception ex)
             {
+                if (route != null) route.Dispose();
+                else DisposeWhenOpen(opening);
+                m_play.Enabled = true;
                 SetError(L.S.CannotStart, ex.Message);
                 return;
             }
@@ -340,6 +393,13 @@ namespace OriginsLauncher
             Hide();
             var keeper = m_keeper;
             bool watched = first != null; // without a process to watch, the token stays for the game as in 2.2.0
+            if (route.Tunneled)
+            {
+                // at the game's login screen: the tunnel while it is up, the account server while it is not
+                keeper.AtLoginScreen = () => route.WriteAddress(m_updater);
+                keeper.IsTunnelPort = route.IsLocalPort;
+            }
+
             var session = new GameSession(m_config, async () =>
             {
                 if (first != null)
@@ -352,7 +412,8 @@ namespace OriginsLauncher
                 // a mode change restarts the client, which logs in again
                 if (!await keeper.RenewAsync(CancellationToken.None))
                     Log.Write("no login token for the restart; the game's login fails until it is started from the launcher");
-                return m_updater.StartGame(manifest, L.S.Code, m_settings.Screen);
+                await route.PrepareAsync();
+                return m_updater.StartGame(manifest, L.S.Code, m_settings.Screen, route.Address);
             }, keeper.WatchAsync);
             try
             {
@@ -365,8 +426,13 @@ namespace OriginsLauncher
 
             if (watched) keeper.Forget(); // the game closed: no token of this session waits in the file
             m_loginSecret = null; // done playing: drop the password held for this session
+            route.Dispose();
             Close();
         }
+
+        /// <summary>A route still opening when "Play" gave up (OpenAsync never throws).</summary>
+        private static void DisposeWhenOpen(Task<GameRoute> opening) =>
+            opening?.ContinueWith(t => t.Result.Dispose(), TaskContinuationOptions.OnlyOnRanToCompletion);
 
         /// <summary>
         ///     Shows the login dialog, keeps the account for this play session and writes the first login token

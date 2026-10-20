@@ -19,6 +19,7 @@ namespace OriginsLauncher
         public string InstallTitle, InstallHeading, InstallInfo, Browse, Install, Cancel, PickFolder, InstallFailed;
         public string LoginTitle, Account, Password, LogIn, LoginInvalid, LoginConnError, LoginBusy;
         public string Screen, FullScreen, FullShort, Window;
+        public string Route, RouteTunnel, RouteDirect, RouteTunnelItem, RouteDirectItem, OpeningTunnel;
 
         public static readonly Strings En = new Strings
         {
@@ -60,7 +61,10 @@ namespace OriginsLauncher
             LoginInvalid = "Wrong account or password.",
             LoginConnError = "Could not reach the login server. Check your internet and try again.",
             LoginBusy = "Too many logins from this connection. Wait a few minutes and try again.",
-            Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}"
+            Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}",
+            Route = "Route", RouteTunnel = "Tunnel", RouteDirect = "Direct",
+            RouteTunnelItem = "UDP tunnel (recommended: less lag when your connection loses packets)",
+            RouteDirectItem = "Direct connection", OpeningTunnel = "Opening the tunnel..."
         };
 
         public static readonly Strings Pt = new Strings
@@ -103,7 +107,10 @@ namespace OriginsLauncher
             LoginInvalid = "Conta ou senha incorretos.",
             LoginConnError = "Não foi possível falar com o servidor de login. Verifique sua internet e tente de novo.",
             LoginBusy = "Muitos logins desta conexão. Aguarde alguns minutos e tente de novo.",
-            Screen = "Tela", FullScreen = "Tela cheia ({0})", FullShort = "Cheia", Window = "Janela {0}"
+            Screen = "Tela", FullScreen = "Tela cheia ({0})", FullShort = "Cheia", Window = "Janela {0}",
+            Route = "Rota", RouteTunnel = "Túnel", RouteDirect = "Direta",
+            RouteTunnelItem = "Túnel UDP (recomendado: menos lag quando a internet perde pacotes)",
+            RouteDirectItem = "Conexão direta", OpeningTunnel = "Abrindo o túnel..."
         };
 
         public static readonly Strings Fil = new Strings
@@ -146,7 +153,10 @@ namespace OriginsLauncher
             LoginInvalid = "Mali ang account o password.",
             LoginConnError = "Hindi maabot ang login server. I-check ang internet mo at subukan ulit.",
             LoginBusy = "Masyadong maraming login mula sa koneksyong ito. Maghintay ng ilang minuto at subukan ulit.",
-            Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}"
+            Screen = "Screen", FullScreen = "Full screen ({0})", FullShort = "Full", Window = "Window {0}",
+            Route = "Ruta", RouteTunnel = "Tunnel", RouteDirect = "Direkta",
+            RouteTunnelItem = "UDP tunnel (inirerekomenda: mas kaunting lag kapag nawawalan ng packet ang koneksyon mo)",
+            RouteDirectItem = "Direktang koneksyon", OpeningTunnel = "Binubuksan ang tunnel..."
         };
 
         public static readonly Strings[] All = {En, Pt, Fil};
@@ -187,6 +197,9 @@ namespace OriginsLauncher
 
         /// <summary>Since 2.2.0: the game's screen, "full" (or missing) or "WxH" (<see cref="ScreenSetup" />).</summary>
         [DataMember(Name = "screen", EmitDefaultValue = false)] public string Screen { get; set; }
+
+        /// <summary>Since 2.4.0: the way to the servers, the UDP tunnel when published (missing) or "direct" (<see cref="GameRoute" />).</summary>
+        [DataMember(Name = "route", EmitDefaultValue = false)] public string Route { get; set; }
 
         public static Settings Load(Config config)
         {

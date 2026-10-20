@@ -64,6 +64,19 @@ namespace OriginsLauncher
         /// <summary>The site refused the account (password changed, banned): the keeper gave up for this session.</summary>
         public bool Stopped => m_stopped;
 
+        /// <summary>
+        ///     Since 2.4.0: called at every look while the game waits at its login screen in front (or alone), before its
+        ///     token is put in the file: the launcher points ini\origins.server at the tunnel or, while the tunnel is
+        ///     down, at the account server itself (<see cref="GameRoute" />). The client reads both files at the click.
+        /// </summary>
+        public Action AtLoginScreen;
+
+        /// <summary>
+        ///     Since 2.4.0: the UDP tunnel's local ports (<see cref="GameRoute.IsLocalPort" />); the game's connections to
+        ///     them mean "logged in" whatever ini\origins.server says at that moment.
+        /// </summary>
+        public Func<int, bool> IsTunnelPort;
+
         /// <summary>The token the login dialog got: written for the game's first login. Throws if the file can't be written.</summary>
         public void Start(IssuedToken token)
         {
@@ -107,7 +120,8 @@ namespace OriginsLauncher
             lock (m_lock) m_token = null;
         }
 
-        public Task WatchAsync(Process game, CancellationToken ct) => WatchAsync(new GameProbe(game, m_config, m_t.OthersCache), ct);
+        public Task WatchAsync(Process game, CancellationToken ct) =>
+            WatchAsync(new GameProbe(game, m_config, m_t.OthersCache) {IsTunnelPort = IsTunnelPort}, ct);
 
         /// <summary>Keeps a token ready while <paramref name="game" /> runs; returns when it exits or on cancel.</summary>
         public async Task WatchAsync(IGameProbe game, CancellationToken ct)
@@ -217,6 +231,7 @@ namespace OriginsLauncher
                 return;
             }
 
+            AtLoginScreen?.Invoke();
             if (m_stopped) return;
             IssuedToken token;
             bool spent;
@@ -449,9 +464,11 @@ namespace OriginsLauncher
     internal sealed class GameProbe : IGameProbe
     {
         private readonly Process m_game;
+        private readonly Config m_config;
         private readonly string m_dir;
         private readonly string m_name;
-        private readonly bool m_loopbackServer;
+        private bool m_loopbackServer;
+        private long m_loopbackAt;
         private readonly TimeSpan m_othersCache;
         private List<IPEndPoint> m_servers = new List<IPEndPoint>();
         private long m_othersAt;
@@ -460,12 +477,17 @@ namespace OriginsLauncher
         public GameProbe(Process game, Config config, TimeSpan? othersCache = null)
         {
             m_game = game;
+            m_config = config;
             m_dir = config.InstallDir;
             m_othersCache = othersCache ?? TimeSpan.FromSeconds(1);
             try { m_name = game.ProcessName; }
             catch (Exception) { m_name = "Conquer"; }
-            m_loopbackServer = ServerIsLoopback(config);
+            m_loopbackServer = ServerIsLoopback(config) ?? false;
+            m_loopbackAt = Stopwatch.GetTimestamp();
         }
+
+        /// <summary>Since 2.4.0: the UDP tunnel's local ports, which count as the server's (see <see cref="IsServer" />).</summary>
+        public Func<int, bool> IsTunnelPort;
 
         public int Id => m_game.Id;
 
@@ -482,13 +504,21 @@ namespace OriginsLauncher
         {
             var remotes = TcpTable.Established(m_game.Id);
             if (remotes == null) return null;
-            m_servers = remotes.Where(r => IsServer(r, m_loopbackServer)).ToList();
+            if (Stopwatch.GetTimestamp() - m_loopbackAt > 2 * Stopwatch.Frequency)
+            {
+                // since 2.4.0 the file changes during the session: 127.0.0.1 while the UDP tunnel carries the game
+                m_loopbackServer = ServerIsLoopback(m_config) ?? m_loopbackServer; // being written: as it was
+                m_loopbackAt = Stopwatch.GetTimestamp();
+            }
+
+            var tunnel = IsTunnelPort;
+            m_servers = remotes.Where(r => IsServer(r, m_loopbackServer || tunnel != null && tunnel(r.Port))).ToList();
             return m_servers.Count > 0;
         }
 
         /// <summary>
-        ///     A connection that means "logged in": not a web one (80/443) and, unless the account server itself is on
-        ///     this machine (a test setup), not to this machine.
+        ///     A connection that means "logged in": not a web one (80/443) and, unless the account server is on this
+        ///     machine (the UDP tunnel's local port since 2.4.0, or a test setup), not to this machine.
         /// </summary>
         public static bool IsServer(IPEndPoint remote, bool loopbackServer) =>
             remote.Port != 80 && remote.Port != 443 && (loopbackServer || !IPAddress.IsLoopback(remote.Address));
@@ -524,7 +554,8 @@ namespace OriginsLauncher
 
         public string Describe() => m_servers.Count == 0 ? "no connection" : string.Join(", ", m_servers);
 
-        private static bool ServerIsLoopback(Config config)
+        /// <summary>ini\origins.server names this machine; null when it can't be read.</summary>
+        private static bool? ServerIsLoopback(Config config)
         {
             try
             {
@@ -536,7 +567,7 @@ namespace OriginsLauncher
             }
             catch (Exception)
             {
-                return false;
+                return null;
             }
         }
 

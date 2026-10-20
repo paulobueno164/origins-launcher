@@ -159,6 +159,50 @@ namespace OriginsLauncher
 
         private string LocalManifestPath => Path.Combine(m_config.StateDir, "manifest.json");
 
+        private string LocalTunnelPath => Path.Combine(m_config.StateDir, "tunnel.json");
+
+        /// <summary>
+        ///     Since 2.4.0: /updates/tunnel.json, where the UDP tunnel's gateway is (<see cref="GameRoute" />); saved for a
+        ///     start while the site can't be reached. Null when none is published (404) or none was ever read.
+        /// </summary>
+        public async Task<TunnelInfo> FetchTunnelAsync(CancellationToken ct)
+        {
+            try
+            {
+                using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    timeout.CancelAfter(TimeSpan.FromSeconds(5)); // the player is waiting to play
+                    using (var response = await Http.GetAsync(m_config.UpdateBaseUrl + "tunnel.json", timeout.Token).ConfigureAwait(false))
+                    {
+                        if (response.StatusCode == HttpStatusCode.NotFound)
+                        {
+                            DeleteIfExists(LocalTunnelPath);
+                            return null;
+                        }
+
+                        response.EnsureSuccessStatusCode();
+                        byte[] body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        var info = Json.Parse<TunnelInfo>(body);
+                        Directory.CreateDirectory(m_config.StateDir);
+                        File.WriteAllBytes(LocalTunnelPath, body);
+                        return info;
+                    }
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                Log.Write($"tunnel.json not read ({ex.GetType().Name}: {ex.Message}); using the saved one");
+                try
+                {
+                    return File.Exists(LocalTunnelPath) ? Json.Parse<TunnelInfo>(File.ReadAllBytes(LocalTunnelPath)) : null;
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
+        }
+
         public async Task<List<NewsItem>> FetchNewsAsync(CancellationToken ct)
         {
             using (var response = await Http.GetAsync(m_config.NewsUrl + "?lang=" + L.S.Code, ct).ConfigureAwait(false))
@@ -1029,16 +1073,17 @@ namespace OriginsLauncher
         public static Func<ProcessStartInfo, Process> StartProcess = Process.Start;
 
         /// <summary>
-        ///     Writes the account server of <paramref name="language" /> to ini\origins.server and the screen choice
-        ///     to ini\GameSetUp.ini [ScreenMode] (<see cref="ScreenSetup" />), then starts the game (6609:
+        ///     Writes the account server of <paramref name="language" /> to ini\origins.server (or
+        ///     <paramref name="server" />: since 2.4.0 the UDP tunnel's local port, <see cref="GameRoute" />) and the
+        ///     screen choice to ini\GameSetUp.ini [ScreenMode] (<see cref="ScreenSetup" />), then starts the game (6609:
         ///     Env_DX9\Conquer.exe blacknull in Env_DX9) DPI-aware: Conquer.exe's manifest declares no DPI awareness,
         ///     so on a monitor at 125%+ Windows would hand it a smaller, scaled desktop (blurry, and too small for the
         ///     full-screen size); __COMPAT_LAYER=HighDpiAware in the environment it inherits turns that off. The
         ///     login token (ini\origins.login) is written before this by the login dialog.
         /// </summary>
-        public Process StartGame(Manifest manifest, string language, string screen = null)
+        public Process StartGame(Manifest manifest, string language, string screen = null, string server = null)
         {
-            WriteServerFile(manifest, language);
+            WriteServerFile(manifest, language, server);
             try
             {
                 ScreenSetup.Write(m_config.InstallDir, screen);
@@ -1078,11 +1123,11 @@ namespace OriginsLauncher
         }
 
         /// <summary>
-        ///     ini\origins.server = the manifest's account server for <paramref name="language" /> (English when the
-        ///     language has none). Without addresses in the manifest the file is left as installed. Returns what was
-        ///     written, or null.
+        ///     ini\origins.server = <paramref name="server" /> when given (the tunnel's local port), else the manifest's
+        ///     account server for <paramref name="language" /> (English when the language has none). Without addresses
+        ///     in the manifest the file is left as installed. Returns what was written, or null.
         /// </summary>
-        public string WriteServerFile(Manifest manifest, string language)
+        public string WriteServerFile(Manifest manifest, string language, string server = null)
         {
             var servers = manifest.AccountServers;
             if (servers == null || servers.Count == 0)
@@ -1091,23 +1136,42 @@ namespace OriginsLauncher
                 return null;
             }
 
+            string address = AccountServer(manifest, language);
+            if (address == null) return null;
+            if (server != null)
+            {
+                if (!IsHostPort(server)) throw new InvalidDataException(L.S.BadManifest);
+                address = server;
+            }
+
+            WriteServerAddress(address);
+            Log.Write($"account server ({language}) = {address}");
+            return address;
+        }
+
+        /// <summary>The manifest's account server for <paramref name="language" /> (English when it has none), or null.</summary>
+        public static string AccountServer(Manifest manifest, string language)
+        {
+            var servers = manifest.AccountServers;
+            if (servers == null || servers.Count == 0) return null;
             if (!servers.TryGetValue(language ?? "", out string address) && !servers.TryGetValue("en", out address))
                 return null;
             address = address?.Trim();
             if (!IsHostPort(address))
                 throw new InvalidDataException(L.S.BadManifest);
+            return address;
+        }
 
+        /// <summary>ini\origins.server = <paramref name="address" />; true if the file changed.</summary>
+        public bool WriteServerAddress(string address)
+        {
             string path = ResolveGamePath(ServerFile);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             byte[] bytes = Encoding.ASCII.GetBytes(address);
-            if (!File.Exists(path) || !File.ReadAllBytes(path).SequenceEqual(bytes))
-            {
-                if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
-                File.WriteAllBytes(path, bytes);
-            }
-
-            Log.Write($"account server ({language}) = {address}");
-            return address;
+            if (File.Exists(path) && File.ReadAllBytes(path).SequenceEqual(bytes)) return false;
+            if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
+            File.WriteAllBytes(path, bytes);
+            return true;
         }
 
         private static bool IsHostPort(string address)

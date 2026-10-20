@@ -16,6 +16,9 @@
 //                                        and a session restarts the game only after a [GameMode] switch
 //   LauncherTests relogin  --dir D       2.3.0: the 5095 header, the site's token answers, ini\origins.login as the client
 //                                        opens it, the TCP probe, and the keeper's login tokens (ReloginTests.cs)
+//   LauncherTests route    --dir D [--gateway H:P --login 29958 --game 25816] [--hold N]
+//                                        2.4.0: the UDP tunnel's route: every way to "direct", and with --gateway a
+//                                        real tunnel cut and restored (RouteTests.cs)
 // Exit code 0 = every check passed.
 
 using System;
@@ -65,6 +68,7 @@ namespace OriginsLauncher
                     case "offline": Offline(config).GetAwaiter().GetResult(); break;
                     case "screen": ScreenCheck(config); break;
                     case "relogin": Relogin(config).GetAwaiter().GetResult(); break;
+                    case "route": RouteCheck(config, o).GetAwaiter().GetResult(); break;
                     default: throw new ArgumentException("unknown command " + args[0]);
                 }
             }

@@ -107,6 +107,13 @@ try {
     T '1.5.0 settings.json' settings --dir $Dir
     T 'screen choice and graphics-mode restart' screen --dir $Dir
     T '2.3.0: 5095 header, login tokens for the game''s own login screen' relogin --dir $Dir
+    # 2.4.0: the UDP tunnel's route; through the dev stack's gateway when it runs (dev-6609.ps1: UDP 25817)
+    if (Get-NetUDPEndpoint -LocalAddress 127.0.0.1 -LocalPort 25817 -ErrorAction SilentlyContinue) {
+        T '2.4.0: the UDP tunnel route, cut and restored (dev gateway)' route --dir $Dir --gateway 127.0.0.1:25817 --login 29958 --game 25816
+    }
+    else {
+        T '2.4.0: the UDP tunnel route (no dev gateway: direct cases only)' route --dir $Dir
+    }
 }
 finally {
     StopServer
