@@ -24,6 +24,9 @@ namespace OriginsLauncher
         [DataMember(Name = "gameExe")] public string GameExe { get; set; }
         [DataMember(Name = "gameArgs")] public string GameArgs { get; set; }
 
+        /// <summary>Patched client consumes this launcher's private token and starts login automatically.</summary>
+        [DataMember(Name = "sessionLogin", EmitDefaultValue = false)] public bool SessionLogin { get; set; }
+
         /// <summary>
         ///     The game's working directory relative to the game folder (6609: Env_DX9; the exe itself then moves
         ///     to the folder above it). Missing (older manifests): the exe's own folder.
@@ -60,6 +63,9 @@ namespace OriginsLauncher
         public static Manifest Fallback() =>
             new Manifest {GameExe = DefaultGameExe, GameArgs = DefaultGameArgs, WorkingDir = DefaultWorkingDir};
 
+        /// <summary>Never fall back to the old shared token when update metadata is unavailable.</summary>
+        public bool SupportsPrivateLogin => SessionLogin && AccountServers != null && AccountServers.Count > 0;
+
         /// <summary>
         ///     Every path this manifest installs, in any language (English files and all language packs): what the
         ///     launcher owns in the game folder.
@@ -67,23 +73,26 @@ namespace OriginsLauncher
         public HashSet<string> AllPaths()
         {
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var file in Files ?? new List<ManifestFile>()) paths.Add(file.Path);
+            foreach (var file in Files ?? new List<ManifestFile>()) paths.Add(PathKey(file.Path));
             foreach (var pack in Languages?.Values ?? Enumerable.Empty<List<ManifestFile>>())
             foreach (var file in pack ?? new List<ManifestFile>())
-                paths.Add(file.Path);
+                paths.Add(PathKey(file.Path));
             return paths;
         }
 
         /// <summary>The file list for <paramref name="language" />: English files with the pack's replacing them.</summary>
         public List<ManifestFile> FilesFor(string language)
         {
-            if (Languages == null || !Languages.TryGetValue(language ?? "", out var pack) || pack == null)
-                return Files;
             var byPath = new Dictionary<string, ManifestFile>(StringComparer.OrdinalIgnoreCase);
-            foreach (var file in Files) byPath[file.Path] = file;
-            foreach (var file in pack) byPath[file.Path] = file;
+            foreach (var file in Files) byPath[PathKey(file.Path)] = file;
+            if (Languages != null && Languages.TryGetValue(language ?? "", out var pack) && pack != null)
+                foreach (var file in pack) byPath[PathKey(file.Path)] = file;
             return byPath.Values.ToList();
         }
+
+        // Both spellings resolve to the same Windows file. CDN URLs remain untouched.
+        // Comparing raw paths deleted newly installed files and raced language overrides.
+        internal static string PathKey(string path) => path?.Replace('/', '\\');
     }
 
     [DataContract]

@@ -1,0 +1,31 @@
+{
+  "launcher_version": "2.5.8",
+  "published_launcher_sha256": "28992a58cb001cb5e8bd0a2f81a402940fc75e17f93308cd71272892c78c3f47",
+  "files": {
+    "src/OriginsLauncher/AtomicFile.cs": "3ab3ecc04a7db0ee50f8dde0e8d8bb29a06f74398015c7dcf0948f82e7f565e8",
+    "src/OriginsLauncher/Config.cs": "3f518e21016f8799589ebf34a12270a6a60ffc80becad76dac64e82f933081cf",
+    "src/OriginsLauncher/Controls.cs": "e20bfbc33e828ddd4e68cd45b705e4bcd7b2fc4dc41d4ffad7cd02ad3eab331d",
+    "src/OriginsLauncher/GameRoute.cs": "eb63dffb41d3daa8ece1f0cb4cac7cd9df7aa49ba30f014fd31f51c662068c96",
+    "src/OriginsLauncher/GameSession.cs": "85f127b55fbe1db12e48c693ed5ae85f9b9dfd1f6f3fac1e98db2bc7a7a28bf0",
+    "src/OriginsLauncher/Installer.cs": "3c5555446757272ba81383175cf5ba9365279691597253312870c1ca964c7491",
+    "src/OriginsLauncher/Log.cs": "196c43caf1799e81fae7dc38eef9cff0d7c9e7eef0506ae3282adc5a623f31ce",
+    "src/OriginsLauncher/Login.cs": "b2921b7ab944d4a01160bb0a2b16bbff23e3b8c87b2391fa51215c33f13e2c23",
+    "src/OriginsLauncher/LoginForm.cs": "3f817883e9e5f162d9b503521dfb9dde4ba244b7ea717dc71f42f72c69e07202",
+    "src/OriginsLauncher/MainForm.cs": "c5d7c2469b6cf8c50eed8565414059483ee8647d406a6c13055f8fefd4e8f36f",
+    "src/OriginsLauncher/Manifest.cs": "c19514db87a834ba59f88f3555e992ce7c46e3b3ce48afb10327a37dbee54b6d",
+    "src/OriginsLauncher/OriginsLauncher.csproj": "a6368e5e4bee187c124d26cc957f48689d0c6bd3411a47a24a405cbce9be57a9",
+    "src/OriginsLauncher/PortableStartup.cs": "edb6950d39b68f7750ac7997628f4d50dfffaa99b4584d28af3c9a1fdfade1fb",
+    "src/OriginsLauncher/Program.cs": "d776b1a59dbfedf98bfbe19a97bce4e95c91d42c6b4e1d96790234b616720ecf",
+    "src/OriginsLauncher/ReloginKeeper.cs": "e6c2a95aa3e126d553932e311dbf8cb720e0d16f57d842e7e389800b3f973a00",
+    "src/OriginsLauncher/ScreenSetup.cs": "3bbdcee17372d0159e9635ad2bf1c24c74a889b52b98faba106ed84cbd249e81",
+    "src/OriginsLauncher/Strings.cs": "2b153ff6f83974524aabaf4547c8cab35ec35912ccb6dcb67efe3e838bf8d205",
+    "src/OriginsLauncher/Tunnel/Bridge.cs": "f4bd3dccf483b883a175edb21a638e683063f6e81fea67afe93c142ba25e57e4",
+    "src/OriginsLauncher/Tunnel/Channel.cs": "56b3ae445ecb9d9017b4fce52f3c2a6367effeb7b714f90eb094e30b64b69fb0",
+    "src/OriginsLauncher/Tunnel/TunnelClient.cs": "e85594f8714f6e25f9b8f4e63aba50064282415804d3e897d95cb93347441943",
+    "src/OriginsLauncher/Tunnel/Wire.cs": "1bac14e1018ff705ba38dca2539c1d33ea58def83b17c153719ebdc46d728930",
+    "src/OriginsLauncher/Updater.cs": "b0c5026511a0c394eefaf7482ba5b083a66e4cea68832566301f2008efae0132",
+    "src/OriginsLauncher/app.manifest": "a473af54b8c2d16c831f2ed33207bf97ad6e9857b33fb23405906ecf97856387",
+    "src/OriginsLauncher/logo.ico": "c80f7a09faf72199f2e0197f3776cee31cf656d83d17da51a7e95980406968f3"
+  },
+  "scope": "Source snapshot of the installed 2.5.8 launcher; public signature still pending. Hashes describe source bytes, not a claim of bit-for-bit reproducible CI binaries."
+}

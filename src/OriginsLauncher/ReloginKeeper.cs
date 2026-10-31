@@ -201,9 +201,11 @@ namespace OriginsLauncher
                     Log.Write($"relogin: the game is logged in ({game.Describe()})");
                 }
 
-                // a token left in the file now would log the next "Log In" (this window after a disconnect, or another
-                // window) into this account with a stale token; it stays in memory for the next login screen
-                RemoveMine("the game is logged in");
+                // Legacy launchers share a file, so hide it from other game windows while playing.
+                // A TCP socket held for five seconds does not prove that MsgAccount has read the token.
+                // A private token belongs only to this process: leave it until the packet builder consumes it.
+                // Removing it during a slow handshake otherwise sends an empty password block to the server.
+                if (m_config.SessionKey == null) RemoveMine("the game is logged in");
                 return;
             }
 
@@ -220,7 +222,7 @@ namespace OriginsLauncher
 
             // Several games from this folder share ini\origins.login: the player clicks "Log In" in the window in
             // front, so only that game's launcher keeps its token there.
-            bool mayUseFile = game.IsForeground() || game.OtherClients() == 0;
+            bool mayUseFile = m_config.SessionKey != null || game.IsForeground() || game.OtherClients() == 0;
             string front = mayUseFile ? "front" : "behind";
             if (front != w.Front && w.Front != null)
                 Log.Write(mayUseFile ? "relogin: this game is in front: its token goes in the file" : "relogin: another game window is in front");
@@ -244,10 +246,12 @@ namespace OriginsLauncher
             if (!Fresh(now))
             {
                 bool idle = token != null && !spent; // never read, only getting old
-                if (idle && w.IdleRenewals >= m_t.IdleRenewals)
+                bool nativeRequest = m_config.SessionKey != null &&
+                    File.Exists(Path.Combine(m_config.InstallDir,m_config.SessionFile("retry")));
+                if (idle && w.IdleRenewals >= m_t.IdleRenewals && !nativeRequest)
                 {
-                    // Enough renewals for one wait. The old token stays in the file: a click on "Log In" reads it (the
-                    // server refuses it, too old), and a token that was read is replaced at once.
+                    // Stop background renewals until the native client requests one. Private
+                    // sessions remove stale tokens below instead of submitting a doomed login.
                 }
                 else if (await MintAsync(ct, false).ConfigureAwait(false) != null && idle)
                 {
@@ -255,6 +259,14 @@ namespace OriginsLauncher
                 }
             }
 
+            // An idle renewal cap must not leave an expired token for the game to
+            // submit. A private native retry resumes renewal through the same rate
+            // and backoff limits, without requiring a deliberately failed login.
+            if (m_config.SessionKey != null && !Fresh(Stopwatch.GetTimestamp()))
+            {
+                RemoveMine("private token is no longer fresh; waiting for renewal");
+                return;
+            }
             EnsureMineInFile();
         }
 
@@ -299,7 +311,13 @@ namespace OriginsLauncher
                 if (token == null || m_spent) return;
             }
 
-            if (LoginClient.ReadTokenFile(m_config) == token.Value)
+            // The native client can consume/delete the file after TickAsync's first
+            // observation. Recreating that same token here would replay a spent
+            // single-use credential and hide the need to obtain a replacement.
+            string inFile = LoginClient.ReadTokenFile(m_config);
+            if (inFile == LoginClient.Busy || Observe(inFile)) return;
+            lock (m_lock) if (m_token != token || m_spent) return;
+            if (inFile == token.Value)
             {
                 lock (m_lock) if (m_token == token) m_inFile = true;
                 return;
@@ -432,8 +450,8 @@ namespace OriginsLauncher
         /// <summary>Renewals of an unread token per wait at the login screen (90 s tokens: about 6 minutes).</summary>
         public int IdleRenewals = 4;
 
-        /// <summary>The site allows 10 logins per 10 minutes per IP (its "auth" limit, shared with the website).</summary>
-        public int RateLimit = 6;
+        /// <summary>Local recovery cap; HTTPS429 responses also enforce the server-side launcher throttle.</summary>
+        public int RateLimit = 60;
 
         public TimeSpan RateWindow = TimeSpan.FromMinutes(10);
         public TimeSpan MinGap = TimeSpan.FromSeconds(5);
@@ -473,6 +491,7 @@ namespace OriginsLauncher
         private List<IPEndPoint> m_servers = new List<IPEndPoint>();
         private long m_othersAt;
         private int m_others;
+        private bool m_nativeRetry;
 
         public GameProbe(Process game, Config config, TimeSpan? othersCache = null)
         {
@@ -502,6 +521,18 @@ namespace OriginsLauncher
 
         public bool? Connected()
         {
+            // 2.5.1: the native login timer explicitly asks for another token after
+            // DC. An account/tunnel/ancillary TCP socket may still be established;
+            // it must not hide the actual login screen from the keeper. The native
+            // MsgAccount builder removes this marker when it consumes the token.
+            if (m_config.SessionKey != null && File.Exists(Path.Combine(m_config.InstallDir,m_config.SessionFile("retry"))))
+            {
+                if (!m_nativeRetry) Log.Write("relogin: native client requested a private token; waiting for packet consumption");
+                m_nativeRetry = true;
+                m_servers.Clear();
+                return false;
+            }
+            m_nativeRetry = false;
             var remotes = TcpTable.Established(m_game.Id);
             if (remotes == null) return null;
             if (Stopwatch.GetTimestamp() - m_loopbackAt > 2 * Stopwatch.Frequency)
@@ -559,7 +590,7 @@ namespace OriginsLauncher
         {
             try
             {
-                string server = File.ReadAllText(Path.Combine(config.InstallDir, Updater.ServerFile), Encoding.ASCII).Trim();
+                string server = File.ReadAllText(Path.Combine(config.InstallDir, config.SessionFile("server")), Encoding.ASCII).Trim();
                 int colon = server.LastIndexOf(':');
                 string host = colon > 0 ? server.Substring(0, colon) : server;
                 return host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||

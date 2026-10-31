@@ -1,0 +1,142 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      sign_release:
+        description: 'Request a production signature and publish a GitHub release after SignPath approval (never deploys the website or game servers)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    outputs:
+      artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify reviewed source snapshot
+        run: python tools/test_signing_readiness.py
+      - name: Build launcher and headless tools
+        shell: pwsh
+        run: |
+          foreach ($project in @('src/OriginsLauncher/OriginsLauncher.csproj', 'tools/LauncherTests/LauncherTests.csproj', 'tools/UpdateBuilder/UpdateBuilder.csproj', 'tools/DevUpdateServer/DevUpdateServer.csproj')) {
+            dotnet build $project -c Release --nologo -p:ContinuousIntegrationBuild=true -p:IncludeSourceRevisionInInformationalVersion=false
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+      - name: Read and verify binary metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $exe = 'src/OriginsLauncher/bin/Release/net48/OriginsLauncher.exe'
+          $version = [Reflection.AssemblyName]::GetAssemblyName((Resolve-Path $exe)).Version.ToString(3)
+          [xml]$project = Get-Content src/OriginsLauncher/OriginsLauncher.csproj
+          if ($version -cne $project.Project.PropertyGroup.Version) { throw 'Assembly/source version mismatch' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag/source version mismatch' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "## Unsigned CI build`nVersion: $version`nCommit: $env:GITHUB_SHA`nSHA-256: $hash`nNo server or website deployment is performed." >> $env:GITHUB_STEP_SUMMARY
+      - name: Test login isolation and updates against loopback fixtures
+        run: python tools/test_headless.py
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: headless-test-evidence
+          path: |
+            artifacts/headless/*/results.json
+            artifacts/headless/*/*.log
+            artifacts/headless/*/http-requests.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload unsigned launcher for verified-origin signing
+        id: unsigned
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: OriginsLauncher-unsigned
+          path: src/OriginsLauncher/bin/Release/net48/OriginsLauncher.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  sign-release:
+    needs: build
+    if: >-
+      github.repository == 'paulobueno164/origins-launcher' &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.sign_release))
+    runs-on: windows-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Require real signing configuration
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          ORIGINS_SIGNER_SUBJECT: ${{ vars.ORIGINS_SIGNER_SUBJECT }}
+        run: ./tools/Test-SigningConfiguration.ps1
+      - name: Download exact unsigned build for payload comparison
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: unsigned
+      - name: Request release signature with verified GitHub origin
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ needs.build.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(needs.build.outputs.version) }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+      - name: Verify trusted publisher and timestamp
+        shell: pwsh
+        env:
+          ORIGINS_SIGNER_SUBJECT: ${{ vars.ORIGINS_SIGNER_SUBJECT }}
+        run: |
+          python tools/check_signed_payload.py unsigned/OriginsLauncher.exe signed/OriginsLauncher.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Signed program differs from unsigned build payload' }
+          ./tools/Test-ReleaseTrust.ps1 -File signed/OriginsLauncher.exe -PublisherSubject $env:ORIGINS_SIGNER_SUBJECT -Receipt signed/signing-receipt.json
+      - name: Upload verified signed artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: OriginsLauncher-signed
+          path: signed/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish signed GitHub release only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if (-not (Test-Path signed/OriginsLauncher.exe) -or -not (Test-Path signed/signing-receipt.json)) { throw 'Verified signed release required' }
+          $hash = (Get-FileHash signed/OriginsLauncher.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $notes = "Launcher $env:RELEASE_VERSION. Built from commit $env:GITHUB_SHA on GitHub-hosted runners; approved and signed through SignPath. SHA-256: $hash. This release does not deploy production."
+          gh release create "v$env:RELEASE_VERSION" signed/OriginsLauncher.exe signed/signing-receipt.json --target $env:GITHUB_SHA --title "Launcher $env:RELEASE_VERSION" --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed' }

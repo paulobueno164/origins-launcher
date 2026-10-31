@@ -165,6 +165,15 @@ namespace OriginsLauncher
                 Check(ms >= 4000 && ms < 7000, $"after the three handshake attempts (~4.5 s): {ms} ms");
                 Check(silent.Available > 0, $"the handshake did reach it ({silent.Available} bytes waiting)");
 
+                // Closing Play during a live handshake must release its ports immediately, too (not only
+                // while tunnel.json is loading). The gateway can be silent for the whole 4.5 s retry window.
+                using (var cancelHandshake = new CancellationTokenSource(300))
+                {
+                    (r, ms) = await Open(ct: cancelHandshake.Token);
+                    IsDirect(r, $"closed during the gateway handshake ({ms} ms)");
+                    Check(ms < 2000, "handshake cancellation does not wait for all retries");
+                }
+
                 // the site down: the saved copy (on, the silent gateway) is still tried
                 site.Serve(500, "");
                 (r, ms) = await Open();
@@ -527,9 +536,9 @@ namespace OriginsLauncher
             public int Forwarded => Volatile.Read(ref m_forwarded);
             public int Dropped => Volatile.Read(ref m_dropped);
 
-            private static UdpClient Open()
+            private static UdpClient Open(IPAddress localAddress = null)
             {
-                var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+                var udp = new UdpClient(new IPEndPoint(localAddress ?? IPAddress.Loopback, 0));
                 udp.Client.IOControl(SioUdpConnReset, new byte[4], null); // a closed launcher socket must not break Receive
                 return udp;
             }
@@ -557,7 +566,9 @@ namespace OriginsLauncher
                     {
                         if (!m_upstream.TryGetValue(r.RemoteEndPoint, out up))
                         {
-                            up = Open();
+                            // A relay to a public gateway needs a routable source address. Binding its upstream
+                            // to loopback only exercised gateways on the same machine and silently lost packets.
+                            up = Open(IPAddress.Any);
                             up.Connect(m_gateway);
                             m_upstream[r.RemoteEndPoint] = up;
                             var client = r.RemoteEndPoint;

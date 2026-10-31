@@ -59,6 +59,13 @@ namespace OriginsLauncher
                 {
                     case "update": Update(config, lang, o.ContainsKey("full"), o.TryGetValue("cancel-at", out string c) ? double.Parse(c, System.Globalization.CultureInfo.InvariantCulture) : (double?) null,
                         o.TryGetValue("expect", out string e) ? int.Parse(e) : (int?) null).GetAwaiter().GetResult(); break;
+                    case "portable": PortableCheck(config,o["binary"]); break;
+                    case "standard": StandardCheck(config,o["binary"]); break;
+                    case "token-replay-regression": TokenReplayRegression(config); break;
+                    case "portable-cache": PortableCache(config).GetAwaiter().GetResult(); break;
+                    case "portable-pack": PortablePack(config,lang).GetAwaiter().GetResult(); break;
+                    case "self-update-integrity": PortableSelfUpdateIntegrity(config).GetAwaiter().GetResult(); break;
+                    case "self-swap": PortableSelfSwap(config).GetAwaiter().GetResult(); break;
                     case "verify": Verify(dir, lang, o["client"], o["lang-root"], o.TryGetValue("keep-changed", out string k) ? k : null); break;
                     case "damage": Damage(dir); break;
                     case "settings": SettingsCheck(config); break;
@@ -68,6 +75,8 @@ namespace OriginsLauncher
                     case "offline": Offline(config).GetAwaiter().GetResult(); break;
                     case "screen": ScreenCheck(config); break;
                     case "relogin": Relogin(config).GetAwaiter().GetResult(); break;
+                    case "session-login": SessionLogin(config).GetAwaiter().GetResult(); break;
+                    case "native-handoff": NativeHandoff(config,o["client"],o["native-script"]).GetAwaiter().GetResult(); break;
                     case "route": RouteCheck(config, o).GetAwaiter().GetResult(); break;
                     default: throw new ArgumentException("unknown command " + args[0]);
                 }
@@ -245,7 +254,7 @@ namespace OriginsLauncher
         private static async Task Start(Config updateConfig, string baseUrl)
         {
             // a stand-in for the site's POST /api/account/launcher-token
-            const string token = "0123456789abcdef0123456789ABCDEF";
+            string token = Guid.NewGuid().ToString("N"); // generated loopback fixture, never a real account token
             var listener = new HttpListener();
             int port = 5098;
             listener.Prefixes.Add($"http://127.0.0.1:{port}/");

@@ -2,3 +2,10 @@ bin/
 obj/
 *.user
 .vs/
+artifacts/
+signed/
+*.pfx
+*.p12
+*.key
+__pycache__/
+*.pyc

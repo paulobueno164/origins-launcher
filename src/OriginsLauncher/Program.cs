@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace OriginsLauncher
@@ -9,6 +10,15 @@ namespace OriginsLauncher
         [STAThread]
         private static void Main(string[] args)
         {
+            // Support/version diagnostics must not open a window or register an installation.
+            if (args.Any(arg => arg.Equals("--version", StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine(typeof(Program).Assembly.GetName().Version.ToString(3));
+                Log.Init(Config.FromArgs(args));
+                Log.Write("Launcher version: " + typeof(Program).Assembly.GetName().Version.ToString(3));
+                return;
+            }
+
             // Older Windows builds default to TLS 1.0; the update server only speaks TLS 1.2+.
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             // .NET Framework allows 2 connections per host by default; downloads run 4 in parallel.

@@ -10,6 +10,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -79,7 +80,10 @@ namespace OriginsLauncher
         public async Task<Manifest> FetchManifestAsync(CancellationToken ct)
         {
             var request = new HttpRequestMessage(HttpMethod.Get, m_config.ManifestUrl);
-            string savedEtag = File.Exists(LocalManifestPath) && File.Exists(LocalEtagPath) ? ReadEtag() : null;
+            byte[] savedBody = null;
+            try { savedBody = AtomicFile.ReadAllBytes(LocalManifestPath); }
+            catch (IOException) { }
+            string savedEtag = savedBody != null ? ReadEtag(savedBody) : null;
             if (savedEtag != null && EntityTagHeaderValue.TryParse(savedEtag, out var tag))
                 request.Headers.IfNoneMatch.Add(tag);
 
@@ -90,7 +94,7 @@ namespace OriginsLauncher
                 Manifest manifest;
                 if (response.StatusCode == HttpStatusCode.NotModified && savedEtag != null)
                 {
-                    manifest = LoadLocalManifest();
+                    manifest = Json.Parse<Manifest>(savedBody);
                     m_fetchedEtag = savedEtag;
                     Log.Write("manifest not modified (304): using the saved one");
                     if (manifest == null) throw new InvalidDataException(L.S.BadManifest);
@@ -129,9 +133,20 @@ namespace OriginsLauncher
 
         private string LocalEtagPath => Path.Combine(m_config.StateDir, "manifest.etag");
 
-        private string ReadEtag()
+        [DataContract]
+        private sealed class ManifestTag
         {
-            try { return File.ReadAllText(LocalEtagPath, Encoding.ASCII).Trim(); }
+            [DataMember] public string Tag { get; set; }
+            [DataMember] public string Sha256 { get; set; }
+        }
+
+        private string ReadEtag(byte[] manifestBody)
+        {
+            try
+            {
+                var record = Json.Parse<ManifestTag>(AtomicFile.ReadAllBytes(LocalEtagPath));
+                return record?.Sha256 == HashBytes(manifestBody) ? record.Tag : null;
+            }
             catch (Exception) { return null; }
         }
 
@@ -140,7 +155,7 @@ namespace OriginsLauncher
         {
             try
             {
-                return File.Exists(LocalManifestPath) ? Json.Parse<Manifest>(File.ReadAllBytes(LocalManifestPath)) : null;
+                return Json.Parse<Manifest>(AtomicFile.ReadAllBytes(LocalManifestPath));
             }
             catch (Exception)
             {
@@ -150,11 +165,9 @@ namespace OriginsLauncher
 
         public void SaveLocalManifest(Manifest manifest)
         {
-            Directory.CreateDirectory(m_config.StateDir);
-            if (File.Exists(LocalEtagPath)) File.Delete(LocalEtagPath); // never an ETag next to another manifest
-            File.WriteAllBytes(LocalManifestPath, Json.Serialize(manifest));
-            if (m_fetchedEtag != null)
-                File.WriteAllText(LocalEtagPath, m_fetchedEtag, Encoding.ASCII);
+            byte[] body = Json.Serialize(manifest);
+            AtomicFile.WriteAllBytes(LocalManifestPath, body);
+            AtomicFile.WriteAllBytes(LocalEtagPath, Json.Serialize(new ManifestTag { Tag = m_fetchedEtag, Sha256 = HashBytes(body) }));
         }
 
         private string LocalManifestPath => Path.Combine(m_config.StateDir, "manifest.json");
@@ -184,7 +197,7 @@ namespace OriginsLauncher
                         byte[] body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
                         var info = Json.Parse<TunnelInfo>(body);
                         Directory.CreateDirectory(m_config.StateDir);
-                        File.WriteAllBytes(LocalTunnelPath, body);
+                        AtomicFile.WriteAllBytes(LocalTunnelPath, body);
                         return info;
                     }
                 }
@@ -194,7 +207,7 @@ namespace OriginsLauncher
                 Log.Write($"tunnel.json not read ({ex.GetType().Name}: {ex.Message}); using the saved one");
                 try
                 {
-                    return File.Exists(LocalTunnelPath) ? Json.Parse<TunnelInfo>(File.ReadAllBytes(LocalTunnelPath)) : null;
+                    return File.Exists(LocalTunnelPath) ? Json.Parse<TunnelInfo>(AtomicFile.ReadAllBytes(LocalTunnelPath)) : null;
                 }
                 catch (Exception)
                 {
@@ -222,7 +235,7 @@ namespace OriginsLauncher
         {
             try
             {
-                return File.Exists(BackgroundPath) ? DecodeImage(File.ReadAllBytes(BackgroundPath)) : null;
+                return File.Exists(BackgroundPath) ? DecodeImage(AtomicFile.ReadAllBytes(BackgroundPath)) : null;
             }
             catch (Exception)
             {
@@ -240,10 +253,10 @@ namespace OriginsLauncher
                     if (!response.IsSuccessStatusCode) return null;
                     byte[] data = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
                     if (data.Length == 0 || data.Length > MaxBackgroundBytes) return null;
-                    if (File.Exists(BackgroundPath) && File.ReadAllBytes(BackgroundPath).SequenceEqual(data)) return null;
+                    if (File.Exists(BackgroundPath) && AtomicFile.ReadAllBytes(BackgroundPath).SequenceEqual(data)) return null;
                     var image = DecodeImage(data);
                     Directory.CreateDirectory(m_config.StateDir);
-                    File.WriteAllBytes(BackgroundPath, data);
+                    AtomicFile.WriteAllBytes(BackgroundPath, data);
                     return image;
                 }
             }
@@ -264,6 +277,8 @@ namespace OriginsLauncher
 
         // ------------------------------------------------------------------ launcher self-update
 
+        internal static Func<ProcessStartInfo, Process> StartSelfUpdater = Process.Start;
+
         public static bool IsLauncherOutdated(Manifest manifest) =>
             Version.TryParse(manifest.LauncherVersion, out var latest) && latest > CurrentVersion;
 
@@ -274,7 +289,8 @@ namespace OriginsLauncher
         public async Task StartSelfUpdateAsync(Manifest manifest, IProgress<UpdateProgress> progress, CancellationToken ct)
         {
             Directory.CreateDirectory(m_config.StateDir);
-            string newExe = Path.Combine(m_config.StateDir, "OriginsLauncher.new.exe");
+            string suffix = Process.GetCurrentProcess().Id + "." + Guid.NewGuid().ToString("N");
+            string newExe = Path.Combine(m_config.StateDir, "OriginsLauncher." + suffix + ".new.exe");
             string url = m_config.UpdateBaseUrl + manifest.LauncherUrl;
 
             progress.Report(new UpdateProgress {Status = L.S.UpdatingLauncher, Fraction = -1});
@@ -299,22 +315,38 @@ namespace OriginsLauncher
                 .Where(a => !a.Equals(Config.AfterUpdateArg, StringComparison.OrdinalIgnoreCase))
                 .Select(a => $"\"{a.Replace("%", "%%")}\"")
                 .Concat(new[] {Config.AfterUpdateArg}));
-            string script = Path.Combine(m_config.StateDir, "update-launcher.cmd");
+            string script = Path.Combine(m_config.StateDir, "update-launcher." + suffix + ".cmd");
+            string batchNewExe = newExe.Replace("%", "%%");
+            string batchExe = exe.Replace("%", "%%");
             File.WriteAllText(script, string.Join("\r\n",
                 "@echo off",
+                "chcp 65001 >nul",
                 ":wait",
                 $"tasklist /FI \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul && (ping 127.0.0.1 -n 2 >nul & goto wait)",
-                $"move /Y \"{newExe}\" \"{exe}\" >nul",
-                $"start \"\" \"{exe}\" {args}",
+                "set attempts=0",
+                ":replace",
+                $"fc /b \"{batchNewExe}\" \"{batchExe}\" >nul 2>&1 && goto launch",
+                $"move /Y \"{batchNewExe}\" \"{batchExe}\" >nul 2>&1 && goto launch",
+                "set /a attempts+=1 >nul",
+                "if %attempts% GEQ 30 exit /b 1",
+                "ping 127.0.0.1 -n 2 >nul",
+                "goto replace",
+                ":launch",
+                $"if exist \"{batchNewExe}\" del \"{batchNewExe}\"",
+                $"start \"\" \"{batchExe}\" {args}",
                 "del \"%~f0\"",
-                ""), Encoding.ASCII);
+                ""), new UTF8Encoding(false));
 
-            Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"")
+            // Expand the environment variable once: literal percent signs in portable
+            // paths must not be interpreted as a second environment substitution.
+            var startInfo = new ProcessStartInfo("cmd.exe", "/d /s /c \"\"%ORIGINS_SELF_UPDATE_SCRIPT%\"\"")
             {
                 CreateNoWindow = true,
                 UseShellExecute = false,
                 WindowStyle = ProcessWindowStyle.Hidden
-            });
+            };
+            startInfo.EnvironmentVariables["ORIGINS_SELF_UPDATE_SCRIPT"] = script;
+            StartSelfUpdater(startInfo);
         }
 
         // ------------------------------------------------------------------ update flow
@@ -326,6 +358,13 @@ namespace OriginsLauncher
         ///     manifest as the installed one. Returns how many files were outdated.
         /// </summary>
         public async Task<int> UpdateGameAsync(Manifest manifest, string language, bool fullCheck,
+            IProgress<UpdateProgress> progress, CancellationToken ct)
+        {
+            using (await AtomicFile.AcquireAsync(Path.Combine(m_config.StateDir, "update.lock"), ct).ConfigureAwait(false))
+                return await UpdateGameLockedAsync(manifest, language, fullCheck, progress, ct).ConfigureAwait(false);
+        }
+
+        private async Task<int> UpdateGameLockedAsync(Manifest manifest, string language, bool fullCheck,
             IProgress<UpdateProgress> progress, CancellationToken ct)
         {
             var previous = LoadLocalManifest();
@@ -356,6 +395,9 @@ namespace OriginsLauncher
             if (outdated.Count > 0)
                 await DownloadAsync(outdated, progress, ct).ConfigureAwait(false);
             RemoveStaleFiles(previous, manifest);
+            var remaining = await FindOutdatedAsync(wanted, false, progress, ct, newClient).ConfigureAwait(false);
+            if (remaining.Count != 0)
+                throw new IOException("The update did not preserve all required game files. Run Verify files again.");
             Log.Write("up to date");
             SaveLocalManifest(manifest);
             return updated;
@@ -1083,6 +1125,8 @@ namespace OriginsLauncher
         /// </summary>
         public Process StartGame(Manifest manifest, string language, string screen = null, string server = null)
         {
+            if (manifest.SessionLogin && m_config.SessionKey == null)
+                throw new InvalidOperationException("Session login must be enabled before issuing the token.");
             WriteServerFile(manifest, language, server);
             try
             {
@@ -1094,6 +1138,13 @@ namespace OriginsLauncher
             }
 
             var info = GameStartInfo(manifest);
+            if (manifest.SessionLogin)
+            {
+                info.UseShellExecute = false;
+                info.EnvironmentVariables["ORIGINS_SESSION"] = m_config.SessionKey;
+                info.EnvironmentVariables[CompatLayer] = HighDpiAware;
+                return StartProcess(info);
+            }
             Log.Write($"start {info.FileName} {info.Arguments} in {info.WorkingDirectory}");
             string layer = Environment.GetEnvironmentVariable(CompatLayer);
             Environment.SetEnvironmentVariable(CompatLayer, HighDpiAware); // ShellExecute: the child gets our environment
@@ -1132,6 +1183,7 @@ namespace OriginsLauncher
             var servers = manifest.AccountServers;
             if (servers == null || servers.Count == 0)
             {
+                if (m_config.SessionKey != null) throw new InvalidDataException(L.S.BadManifest);
                 Log.Write("manifest has no account servers; ini\\origins.server left as it is");
                 return null;
             }
@@ -1165,13 +1217,24 @@ namespace OriginsLauncher
         /// <summary>ini\origins.server = <paramref name="address" />; true if the file changed.</summary>
         public bool WriteServerAddress(string address)
         {
-            string path = ResolveGamePath(ServerFile);
+            string path = ResolveGamePath(m_config.SessionFile("server"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             byte[] bytes = Encoding.ASCII.GetBytes(address);
-            if (File.Exists(path) && File.ReadAllBytes(path).SequenceEqual(bytes)) return false;
+            if (File.Exists(path) && AtomicFile.ReadAllBytes(path).SequenceEqual(bytes)) return false;
             if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
-            File.WriteAllBytes(path, bytes);
+            AtomicFile.WriteAllBytes(path, bytes);
             return true;
+        }
+
+        /// <summary>Only this launcher's private files; never removes a shared token or another session's files.</summary>
+        public void CleanupSessionFiles()
+        {
+            if (m_config.SessionKey == null) return;
+            foreach (string extension in new[] {"login", "server", "retry"})
+            {
+                try { File.Delete(ResolveGamePath(m_config.SessionFile(extension))); }
+                catch (Exception ex) { Log.Write($"session {extension} cleanup: {ex.Message}"); }
+            }
         }
 
         private static bool IsHostPort(string address)
@@ -1244,7 +1307,7 @@ namespace OriginsLauncher
             try
             {
                 Directory.CreateDirectory(m_config.StateDir);
-                string probe = Path.Combine(m_config.StateDir, "write.test");
+                string probe = Path.Combine(m_config.StateDir, "write." + Guid.NewGuid().ToString("N") + ".test");
                 File.WriteAllText(probe, "ok");
                 File.Delete(probe);
                 return true;
@@ -1282,7 +1345,7 @@ namespace OriginsLauncher
             try
             {
                 if (File.Exists(CachePath))
-                    m_cache = Json.Parse<HashCache>(File.ReadAllBytes(CachePath)) ?? new HashCache();
+                    m_cache = Json.Parse<HashCache>(AtomicFile.ReadAllBytes(CachePath)) ?? new HashCache();
             }
             catch (Exception)
             {
@@ -1296,10 +1359,7 @@ namespace OriginsLauncher
         private void SaveCache()
         {
             Directory.CreateDirectory(m_config.StateDir);
-            string temp = CachePath + ".tmp";
-            File.WriteAllBytes(temp, Json.Serialize(m_cache));
-            if (File.Exists(CachePath)) File.Delete(CachePath);
-            File.Move(temp, CachePath);
+            lock (m_cache) AtomicFile.WriteAllBytes(CachePath, Json.Serialize(m_cache));
         }
 
         public static string HashFile(string path)

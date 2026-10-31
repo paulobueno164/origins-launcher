@@ -95,7 +95,7 @@ namespace OriginsLauncher
             throw new LoginException(L.S.LoginInvalid);
         }
 
-        public static string TokenPath(Config config) => Path.Combine(config.InstallDir, TokenFile);
+        public static string TokenPath(Config config) => Path.Combine(config.InstallDir, config.SessionFile("login"));
 
         /// <summary>
         ///     Writes the token the patched client reads at login: ini\origins.login, the 32 token characters as

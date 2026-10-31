@@ -1,0 +1,10 @@
+# Preserve the reviewed source snapshot byte-for-byte, including existing CRLFs.
+src/** -text
+*.cs -text
+*.csproj -text
+*.ico binary
+*.py text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.xml text eol=lf

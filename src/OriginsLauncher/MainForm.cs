@@ -252,7 +252,7 @@ namespace OriginsLauncher
                     // HttpClient reports its own timeout as a cancellation; only a real close is silent.
                     Log.Write($"manifest failed: {ex.GetType().Name}: {ex.Message}");
                     m_manifest = m_updater.LoadLocalManifest();
-                    if (m_updater.GameFilesPresent(m_manifest?.GameExe ?? Manifest.DefaultGameExe))
+                    if (m_manifest?.SupportsPrivateLogin == true && m_updater.GameFilesPresent(m_manifest.GameExe))
                     {
                         SetStatus(L.S.ServerDown, L.S.ServerDownPlay, 1, Theme.Error);
                         m_play.Enabled = true;
@@ -339,8 +339,13 @@ namespace OriginsLauncher
 
         private async void PlayGame()
         {
-            if (m_manifest == null && !m_updater.GameFilesPresent()) return;
-            var manifest = m_manifest ?? Manifest.Fallback();
+            if (m_manifest?.SupportsPrivateLogin != true)
+            {
+                SetError(L.S.UpdateError, L.S.TryAgain);
+                return;
+            }
+            var manifest = m_manifest;
+            m_config.EnableSessionLogin();
             Process first;
             Task<GameRoute> opening = null;
             GameRoute route = null;
@@ -382,6 +387,9 @@ namespace OriginsLauncher
             {
                 if (route != null) route.Dispose();
                 else DisposeWhenOpen(opening);
+                m_keeper?.Forget();
+                m_loginSecret = null;
+                m_updater.CleanupSessionFiles();
                 m_play.Enabled = true;
                 SetError(L.S.CannotStart, ex.Message);
                 return;
@@ -427,7 +435,15 @@ namespace OriginsLauncher
             if (watched) keeper.Forget(); // the game closed: no token of this session waits in the file
             m_loginSecret = null; // done playing: drop the password held for this session
             route.Dispose();
-            Close();
+            m_updater.CleanupSessionFiles();
+            if (manifest.SessionLogin && !IsDisposed && !m_cts.IsCancellationRequested)
+            {
+                m_keeper = null;
+                m_play.Enabled = true;
+                SetStatus(L.S.Ready, L.S.UpToDate, 1, Theme.Ok);
+                Show(); // the same launcher may start another account/session after this game closes
+            }
+            else Close();
         }
 
         /// <summary>A route still opening when "Play" gave up (OpenAsync never throws).</summary>

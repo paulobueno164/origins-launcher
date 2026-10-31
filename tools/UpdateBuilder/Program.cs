@@ -31,8 +31,12 @@ string gameExe = options.GetValueOrDefault("game-exe", @"Env_DX9\Conquer.exe");
 string workingDir = options.GetValueOrDefault("working-dir", "Env_DX9");
 string gameArgs = options.GetValueOrDefault("game-args", "blacknull");
 bool dryRun = options.ContainsKey("dry-run");
-
 if (!File.Exists(Path.Combine(source, gameExe))) Fail($"{source} has no {gameExe}");
+bool sessionLogin = File.ReadAllBytes(Path.Combine(source,gameExe)).AsSpan()
+    .IndexOf(System.Text.Encoding.Unicode.GetBytes("ORIGINS_SESSION\0")) >= 0;
+if(options.ContainsKey("session-login") && !sessionLogin)
+    Fail("--session-login requires a client with the private-session native login patch");
+
 if (!Directory.Exists(Path.Combine(source, workingDir))) Fail($"{source} has no folder {workingDir}");
 if (!File.Exists(launcher)) Fail($"launcher not found: {launcher}");
 
@@ -291,6 +295,7 @@ var manifest = new Manifest
     LauncherUrl = "launcher/OriginsLauncher.exe",
     GameExe = gameExe,
     GameArgs = gameArgs,
+    SessionLogin = sessionLogin,
     WorkingDir = workingDir,
     AccountServers = accountServers,
     Files = entries.ToList(),
@@ -301,6 +306,7 @@ var manifest = new Manifest
 bool changed = previous == null ||
                previous.LauncherSha256 != manifest.LauncherSha256 ||
                previous.GameExe != manifest.GameExe || previous.GameArgs != manifest.GameArgs ||
+               previous.SessionLogin != manifest.SessionLogin ||
                previous.WorkingDir != manifest.WorkingDir ||
                ServersKey(previous.AccountServers) != ServersKey(manifest.AccountServers) ||
                previous.Files.Count != manifest.Files.Count ||
@@ -418,6 +424,7 @@ internal sealed class Manifest
     [JsonPropertyName("launcherUrl")] public string LauncherUrl { get; set; } = "";
     [JsonPropertyName("gameExe")] public string GameExe { get; set; } = "";
     [JsonPropertyName("gameArgs")] public string GameArgs { get; set; } = "";
+    [JsonPropertyName("sessionLogin")] public bool SessionLogin { get; set; }
     [JsonPropertyName("workingDir")] public string? WorkingDir { get; set; }
     [JsonPropertyName("accountServers")] public Dictionary<string, string>? AccountServers { get; set; }
     [JsonPropertyName("files")] public List<ManifestFile> Files { get; set; } = new();

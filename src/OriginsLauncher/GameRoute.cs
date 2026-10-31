@@ -86,7 +86,9 @@ namespace OriginsLauncher
             TunnelClient tunnel = null;
             try
             {
+                ct.ThrowIfCancellationRequested();
                 var info = await updater.FetchTunnelAsync(ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
                 if (info == null || !info.Enabled || string.IsNullOrEmpty(info.Host) || info.Port <= 0 || info.Port > 65535 ||
                     info.GamePort <= 0 || info.GamePort > 65535)
                 {
@@ -95,9 +97,16 @@ namespace OriginsLauncher
                 }
 
                 int loginPort = int.Parse(direct.Substring(direct.LastIndexOf(':') + 1));
-                var gateway = new IPEndPoint(await ResolveAsync(info.Host).ConfigureAwait(false), info.Port);
+                IPAddress address;
+                using (var resolving = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    resolving.CancelAfter(5000);
+                    address = await WithCancellation(ResolveAsync(info.Host), resolving.Token).ConfigureAwait(false);
+                }
+                ct.ThrowIfCancellationRequested();
+                var gateway = new IPEndPoint(address, info.Port);
                 tunnel = new TunnelClient(gateway, new[] {loginPort, info.GamePort}, info.GamePort) {Log = Log.Write};
-                if (!await tunnel.StartAsync().ConfigureAwait(false))
+                if (!await WithCancellation(tunnel.StartAsync(), ct).ConfigureAwait(false))
                 {
                     tunnel.Dispose();
                     Log.Write($"route: direct (the tunnel's gateway {gateway} did not answer)");
@@ -163,6 +172,21 @@ namespace OriginsLauncher
             var all = await Dns.GetHostAddressesAsync(host).ConfigureAwait(false);
             return all.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ??
                    throw new SocketException((int) SocketError.HostNotFound);
+        }
+
+        // net48 has no Task.WaitAsync. Closing the launcher must also interrupt DNS/the UDP handshake;
+        // the catch above disposes the tunnel, closing listeners and releasing a pending exchange.
+        private static async Task<T> WithCancellation<T>(Task<T> task, CancellationToken ct)
+        {
+            if (!ct.CanBeCanceled) return await task.ConfigureAwait(false);
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (ct.Register(() => cancelled.TrySetResult(true)))
+            {
+                if (await Task.WhenAny(task, cancelled.Task).ConfigureAwait(false) != task)
+                    ct.ThrowIfCancellationRequested();
+                ct.ThrowIfCancellationRequested();
+                return await task.ConfigureAwait(false);
+            }
         }
     }
 }

@@ -17,6 +17,13 @@ namespace OriginsLauncher
         /// <summary>Set by "--dir=": the folder was chosen on purpose, so no install prompt or shortcuts.</summary>
         public bool ExplicitDir { get; private set; }
 
+        // Each launcher owns its token and route. Only enabled for clients declaring sessionLogin in the manifest.
+        public string SessionKey { get; private set; }
+        public void EnableSessionLogin() => SessionKey ??= Guid.NewGuid().ToString("N");
+        public string SessionFile(string extension) => SessionKey == null
+            ? @"ini\origins." + extension
+            : @"ini\origins." + SessionKey + "." + extension;
+
         public const string AfterUpdateArg = "--after-update";
 
         /// <summary>Started by the self-update script: never self-update twice in a row.</summary>
